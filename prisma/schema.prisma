@@ -1,0 +1,163 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model AnonymousSession {
+  id          String   @id @default(cuid())
+  username    String
+  createdAt   DateTime @default(now())
+  lastSeen    DateTime @default(now())
+  currentRoomId String?
+  status      SessionStatus @default(ACTIVE)
+  messageCount Int      @default(0)
+  ipHash      String?
+  isBanned    Boolean  @default(false)
+  bannedAt    DateTime?
+  bannedReason String?
+
+  currentRoom Room?    @relation(fields: [currentRoomId], references: [id])
+  messages    Message[]
+  reports     Report[]  @relation("reportedBy")
+  reportedMessages Report[] @relation("reportedSession")
+
+  @@index([username])
+  @@index([ipHash])
+  @@index([lastSeen])
+  @@map("anonymous_sessions")
+}
+
+model Room {
+  id           String   @id @default(cuid())
+  name         String
+  slug         String   @unique
+  description  String?
+  category     String   @default("general")
+  isDefault    Boolean  @default(false)
+  isArchived   Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  lastActivity DateTime @default(now())
+  activeUserCount Int   @default(0)
+  messageCount Int      @default(0)
+
+  sessions     AnonymousSession[]
+  messages     Message[]
+  reports      Report[]
+
+  @@index([slug])
+  @@index([lastActivity])
+  @@index([isDefault])
+  @@map("rooms")
+}
+
+model Message {
+  id        String   @id @default(cuid())
+  roomId    String
+  sessionId String
+  content   String
+  createdAt DateTime @default(now())
+  isDeleted Boolean  @default(false)
+  deletedAt DateTime?
+
+  room      Room     @relation(fields: [roomId], references: [id])
+  session   AnonymousSession @relation(fields: [sessionId], references: [id])
+  reports   Report[]
+
+  @@index([roomId, createdAt])
+  @@index([sessionId])
+  @@map("messages")
+}
+
+model Report {
+  id          String   @id @default(cuid())
+  roomId      String
+  messageId   String?
+  reporterId  String
+  reportedSessionId String?
+  reason      ReportReason
+  description String?
+  status      ReportStatus @default(PENDING)
+  createdAt   DateTime @default(now())
+  resolvedAt  DateTime?
+  resolvedBy  String?
+
+  room        Room     @relation(fields: [roomId], references: [id])
+  message     Message? @relation(fields: [messageId], references: [id])
+  reporter    AnonymousSession @relation("reportedBy", fields: [reporterId], references: [id])
+  reportedSession AnonymousSession? @relation("reportedSession", fields: [reportedSessionId], references: [id])
+
+  @@index([status])
+  @@index([createdAt])
+  @@map("reports")
+}
+
+model BlockedIP {
+  id          String   @id @default(cuid())
+  ipHash      String   @unique
+  ipMasked    String
+  reason      String
+  isPermanent Boolean  @default(false)
+  expiresAt   DateTime?
+  createdAt   DateTime @default(now())
+  createdBy   String
+
+  @@index([ipHash])
+  @@map("blocked_ips")
+}
+
+model Admin {
+  id           String   @id @default(cuid())
+  username     String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+  lastLogin    DateTime?
+
+  @@map("admins")
+}
+
+model AdminSetting {
+  key       String @id
+  value     String
+  updatedAt DateTime @default(now())
+
+  @@map("admin_settings")
+}
+
+model AdminLog {
+  id        String   @id @default(cuid())
+  adminId   String?
+  action    String
+  details   String?
+  ipHash    String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@map("admin_logs")
+}
+
+enum SessionStatus {
+  ACTIVE
+  INACTIVE
+  BANNED
+}
+
+enum ReportReason {
+  SPAM
+  HARASSMENT
+  HATE_ABUSE
+  SEXUAL_CONTENT
+  ILLEGAL_CONTENT
+  SCAM
+  OTHER
+}
+
+enum ReportStatus {
+  PENDING
+  REVIEWING
+  RESOLVED
+  DISMISSED
+}

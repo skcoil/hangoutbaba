@@ -51,7 +51,7 @@ export function generateRoomTitle(messages: string[]): string {
   if (keywords.length === 0) return 'General Chat';
 
   const freq = getFrequencyMap(keywords);
-  const sorted = [...freq.entries()]
+  const sorted = Array.from(freq.entries())
     .sort((a, b) => b[1] - a[1])
     .map(([w]) => w);
 

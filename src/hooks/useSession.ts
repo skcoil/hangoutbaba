@@ -1,6 +1,9 @@
 'use client';
 import { useState, useEffect, useCallback } from 'react';
 import { SessionData } from '@/types';
+import { generateUsername, isValidUsername } from '@/lib/username';
+import { sanitizeUsername } from '@/lib/sanitize';
+import { v4 as uuidv4 } from 'uuid';
 
 const SESSION_KEY = 'hb_session';
 
@@ -12,25 +15,32 @@ export function useSession() {
     initSession();
   }, []);
 
-  async function initSession() {
-    setLoading(true);
+  function initSession() {
     try {
-      const stored = localStorage.getItem(SESSION_KEY);
-      const existingId = stored ? JSON.parse(stored)?.id : null;
+      const stored = typeof window !== 'undefined' ? localStorage.getItem(SESSION_KEY) : null;
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed?.id && parsed?.username) {
+          setSession(parsed);
+          setLoading(false);
+          return;
+        }
+      }
 
-      const res = await fetch('/api/session', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId: existingId }),
-      });
+      // Generate a new anonymous session locally
+      const newSession: SessionData = {
+        id: uuidv4(),
+        username: generateUsername(),
+        createdAt: new Date().toISOString(),
+        isBanned: false,
+      };
 
-      if (res.ok) {
-        const data: SessionData = await res.json();
-        setSession(data);
-        localStorage.setItem(SESSION_KEY, JSON.stringify(data));
+      setSession(newSession);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem(SESSION_KEY, JSON.stringify(newSession));
       }
     } catch (err) {
-      console.error('[useSession] Failed to init session:', err);
+      console.error('[useSession] Local session error:', err);
     } finally {
       setLoading(false);
     }
@@ -38,20 +48,15 @@ export function useSession() {
 
   const updateUsername = useCallback(async (newUsername: string) => {
     if (!session) return false;
-    try {
-      const res = await fetch('/api/session', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId: session.id, username: newUsername }),
-      });
-      if (res.ok) {
-        const updated = { ...session, username: newUsername };
-        setSession(updated);
-        localStorage.setItem(SESSION_KEY, JSON.stringify(updated));
-        return true;
-      }
-    } catch {}
-    return false;
+    const cleaned = sanitizeUsername(newUsername);
+    if (!isValidUsername(cleaned)) return false;
+
+    const updated: SessionData = { ...session, username: cleaned };
+    setSession(updated);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(SESSION_KEY, JSON.stringify(updated));
+    }
+    return true;
   }, [session]);
 
   return { session, loading, updateUsername, refreshSession: initSession };

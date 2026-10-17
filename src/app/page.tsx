@@ -1,16 +1,24 @@
+'use client';
+import { useState } from 'react';
 import Link from 'next/link';
 import { Header } from '@/components/layout/Header';
 import { Footer } from '@/components/layout/Footer';
 import { Button } from '@/components/ui/Button';
+import { useRooms } from '@/hooks/useRooms';
+import { CreateRoomModal } from '@/components/chat/CreateRoomModal';
+import { Spinner } from '@/components/ui/Spinner';
 
-const SAMPLE_ROOMS = [
-  { emoji: '💬', name: 'General', count: 128 },
-  { emoji: '🎮', name: 'Gaming', count: 74 },
-  { emoji: '💻', name: 'Technology', count: 52 },
-  { emoji: '🎵', name: 'Music', count: 41 },
-  { emoji: '❤️', name: 'Relationships', count: 38 },
-  { emoji: '🧠', name: 'Study', count: 29 },
-];
+const CATEGORY_EMOJIS: Record<string, string> = {
+  general: '💬',
+  tech: '💻',
+  gaming: '🎮',
+  entertainment: '🎵',
+  social: '❤️',
+  education: '🧠',
+  lifestyle: '✈️',
+  regional: '🌍',
+  fun: '😂',
+};
 
 const HOW_IT_WORKS = [
   { step: '1', text: 'Open the site' },
@@ -20,6 +28,12 @@ const HOW_IT_WORKS = [
 ];
 
 export default function HomePage() {
+  const { trendingRooms, totalOnlineUsers, loading, createRoom } = useRooms();
+  const [modalOpen, setModalOpen] = useState(false);
+
+  // Take top 6 trending rooms
+  const topTrending = trendingRooms.slice(0, 6);
+
   return (
     <div className="min-h-screen bg-white flex flex-col">
       <Header />
@@ -29,7 +43,11 @@ export default function HomePage() {
         <section className="max-w-4xl mx-auto px-4 pt-20 pb-16 text-center">
           <div className="inline-flex items-center gap-2 bg-accent-50 text-accent-700 text-sm font-medium px-4 py-1.5 rounded-full mb-6">
             <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
-            <span>1,200+ people chatting right now</span>
+            <span>
+              {totalOnlineUsers > 0
+                ? `${totalOnlineUsers.toLocaleString()} ${totalOnlineUsers === 1 ? 'person' : 'people'} chatting right now`
+                : '100% Free Anonymous Chatrooms'}
+            </span>
           </div>
           <h1 className="text-5xl md:text-6xl font-bold text-gray-900 mb-6 leading-tight">
             Talk freely.
@@ -46,32 +64,104 @@ export default function HomePage() {
                 Start Chatting →
               </Button>
             </Link>
-            <Link href="/chat">
-              <Button size="lg" variant="secondary" className="w-full sm:w-auto px-8">
-                Explore Rooms
-              </Button>
-            </Link>
+            <Button
+              size="lg"
+              variant="secondary"
+              className="w-full sm:w-auto px-8 flex items-center justify-center gap-2"
+              onClick={() => setModalOpen(true)}
+            >
+              <span>✨</span> Create New Room
+            </Button>
           </div>
           <p className="mt-6 text-sm text-gray-400">No signup • No profile • Free forever</p>
         </section>
 
-        {/* Popular Rooms */}
+        {/* 🔥 Trending Rooms based on active users */}
         <section className="max-w-4xl mx-auto px-4 py-12">
-          <h2 className="text-2xl font-bold text-gray-900 mb-6 text-center">Popular Rooms</h2>
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-            {SAMPLE_ROOMS.map((room) => (
-              <Link
-                key={room.name}
-                href={`/room/${room.name.toLowerCase()}`}
-                className="group flex items-center justify-between p-4 bg-white border border-gray-100 rounded-2xl hover:border-accent-200 hover:shadow-sm transition-all duration-150"
-              >
-                <div className="flex items-center gap-3">
-                  <span className="text-2xl">{room.emoji}</span>
-                  <span className="font-medium text-gray-800 group-hover:text-accent-600 transition-colors">{room.name}</span>
-                </div>
-                <span className="text-sm text-gray-400">{room.count}</span>
-              </Link>
-            ))}
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+                <span>🔥</span> Trending Chatrooms
+              </h2>
+              <p className="text-sm text-gray-500 mt-1">
+                Ranked live by active users in each room
+              </p>
+            </div>
+            <button
+              onClick={() => setModalOpen(true)}
+              className="text-xs font-semibold text-accent-600 hover:text-accent-700 bg-accent-50 hover:bg-accent-100 px-3 py-1.5 rounded-xl transition-colors flex items-center gap-1.5"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              <span>Create Room</span>
+            </button>
+          </div>
+
+          {loading ? (
+            <div className="flex justify-center py-12">
+              <Spinner />
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3.5">
+              {topTrending.map((room) => {
+                const emoji = CATEGORY_EMOJIS[room.category] || '💬';
+                return (
+                  <Link
+                    key={room.slug}
+                    href={`/room/${room.slug}`}
+                    prefetch={false}
+                    className="group flex flex-col justify-between p-4 bg-white border border-gray-100 rounded-2xl hover:border-accent-300 hover:shadow-md transition-all duration-150 relative overflow-hidden"
+                  >
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <span className="text-2xl p-2 bg-gray-50 rounded-xl group-hover:scale-110 transition-transform">
+                          {emoji}
+                        </span>
+                        <div className="min-w-0">
+                          <h3 className="font-semibold text-gray-900 group-hover:text-accent-600 transition-colors text-sm truncate">
+                            {room.name}
+                          </h3>
+                          <span className="text-xs text-gray-400 capitalize">
+                            {room.category}
+                          </span>
+                        </div>
+                      </div>
+
+                      {room.activeUserCount > 0 ? (
+                        <span className="inline-flex items-center gap-1 text-xs font-semibold text-green-700 bg-green-50 px-2 py-0.5 rounded-full shrink-0">
+                          <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
+                          {room.activeUserCount} online
+                        </span>
+                      ) : (
+                        <span className="text-xs text-gray-400 shrink-0">
+                          Open
+                        </span>
+                      )}
+                    </div>
+
+                    {room.description && (
+                      <p className="text-xs text-gray-500 line-clamp-1 mb-2">
+                        {room.description}
+                      </p>
+                    )}
+
+                    <div className="mt-auto pt-2 border-t border-gray-50 flex items-center justify-between text-xs text-accent-600 font-medium">
+                      <span>Join Room</span>
+                      <span className="group-hover:translate-x-1 transition-transform">→</span>
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          )}
+
+          <div className="text-center mt-6">
+            <Link href="/chat">
+              <Button variant="secondary" size="sm" className="px-6">
+                View All Rooms ({trendingRooms.length}) →
+              </Button>
+            </Link>
           </div>
         </section>
 
@@ -109,6 +199,13 @@ export default function HomePage() {
       </main>
 
       <Footer />
+
+      {/* Create Room Modal */}
+      <CreateRoomModal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        onCreateRoom={createRoom}
+      />
     </div>
   );
 }

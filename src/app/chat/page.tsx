@@ -1,30 +1,17 @@
 'use client';
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState } from 'react';
 import { useSession } from '@/hooks/useSession';
-import { RoomData } from '@/types';
+import { useRooms } from '@/hooks/useRooms';
 import { RoomSidebar } from '@/components/chat/RoomSidebar';
+import { CreateRoomModal } from '@/components/chat/CreateRoomModal';
 import { Spinner } from '@/components/ui/Spinner';
+import { Button } from '@/components/ui/Button';
 import Link from 'next/link';
 
 export default function ChatPage() {
   const { session, loading: sessionLoading } = useSession();
-  const [rooms, setRooms] = useState<RoomData[]>([]);
-  const [roomsLoading, setRoomsLoading] = useState(true);
-  const router = useRouter();
-
-  useEffect(() => {
-    fetchRooms();
-  }, []);
-
-  async function fetchRooms() {
-    try {
-      const res = await fetch('/api/rooms');
-      if (res.ok) setRooms(await res.json());
-    } finally {
-      setRoomsLoading(false);
-    }
-  }
+  const { rooms, loading: roomsLoading, createRoom } = useRooms();
+  const [modalOpen, setModalOpen] = useState(false);
 
   if (sessionLoading) {
     return (
@@ -49,19 +36,28 @@ export default function ChatPage() {
         <RoomSidebar
           rooms={rooms}
           loading={roomsLoading}
-          onNewRoom={() => router.push('/chat')}
+          onCreateRoom={createRoom}
         />
         <main className="flex-1 flex flex-col items-center justify-center text-center px-8 bg-gray-50">
           <span className="text-5xl mb-4">💬</span>
           <h2 className="text-xl font-semibold text-gray-800 mb-2">Welcome, {session?.username || 'friend'}!</h2>
-          <p className="text-gray-500 max-w-sm">
-            Select a room from the sidebar to join the conversation.
+          <p className="text-gray-500 max-w-sm mb-6">
+            Select a room from the sidebar to join the conversation, or create your own topic room.
           </p>
-          <p className="mt-6 text-xs text-gray-400">
+          <Button onClick={() => setModalOpen(true)} className="flex items-center gap-2">
+            <span>✨</span> Create New Chatroom
+          </Button>
+          <p className="mt-8 text-xs text-gray-400">
             Your anonymous username: <strong className="text-gray-600">{session?.username}</strong>
           </p>
         </main>
       </div>
+
+      <CreateRoomModal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        onCreateRoom={createRoom}
+      />
     </div>
   );
 }

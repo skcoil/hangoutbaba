@@ -20,13 +20,6 @@ const CATEGORY_EMOJIS: Record<string, string> = {
   fun: '😂',
 };
 
-const HOW_IT_WORKS = [
-  { step: '1', text: 'Open the site' },
-  { step: '2', text: 'Get an anonymous identity instantly' },
-  { step: '3', text: 'Join a room or start 1-to-1 video' },
-  { step: '4', text: 'Talk freely with real people' },
-];
-
 export default function HomePage() {
   const { trendingRooms, totalOnlineUsers, loading, createRoom } = useRooms();
   const [modalOpen, setModalOpen] = useState(false);
@@ -35,100 +28,129 @@ export default function HomePage() {
   const topTrending = trendingRooms.slice(0, 6);
 
   return (
-    <div className="min-h-screen bg-white flex flex-col">
+    <div className="min-h-screen bg-white flex flex-col font-sans selection:bg-accent-100 selection:text-accent-900">
       <Header />
 
       <main className="flex-1">
-        {/* Hero */}
-        <section className="max-w-4xl mx-auto px-4 pt-16 pb-12 text-center">
-          <div className="inline-flex items-center gap-2 bg-accent-50 text-accent-700 text-sm font-medium px-4 py-1.5 rounded-full mb-6 border border-accent-200/50">
-            <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-            <span>
-              {totalOnlineUsers > 0
-                ? `${totalOnlineUsers.toLocaleString()} ${totalOnlineUsers === 1 ? 'person' : 'people'} online right now`
-                : '100% Free Anonymous Video & Text Chat'}
-            </span>
-          </div>
-          <h1 className="text-4xl sm:text-5xl md:text-6xl font-extrabold text-gray-900 mb-6 leading-tight">
-            Talk freely.
-            <br />
-            <span className="text-accent-600">Stay completely anonymous.</span>
-          </h1>
-          <p className="text-base sm:text-lg text-gray-500 mb-8 max-w-xl mx-auto leading-relaxed">
-            Join group chatrooms or start <strong>random 1-to-1 video calls</strong> with strangers across the globe. No signup, no profile, zero trackers.
-          </p>
-          <div className="flex flex-col sm:flex-row gap-3 justify-center items-center">
-            <Link href="/video" className="w-full sm:w-auto">
-              <Button size="lg" className="w-full sm:w-auto px-8 bg-gradient-to-r from-accent-600 to-indigo-600 hover:from-accent-700 hover:to-indigo-700 shadow-md shadow-accent-600/20 flex items-center justify-center gap-2">
-                <span>📹</span> Random Video Chat (New)
-              </Button>
-            </Link>
-            <Link href="/chat" className="w-full sm:w-auto">
-              <Button size="lg" variant="secondary" className="w-full sm:w-auto px-7 flex items-center justify-center gap-2">
-                <span>💬</span> Browse Rooms
-              </Button>
-            </Link>
-            <Button
-              size="lg"
-              variant="secondary"
-              className="w-full sm:w-auto px-6 flex items-center justify-center gap-2 text-gray-600"
-              onClick={() => setModalOpen(true)}
-            >
-              <span>✨</span> New Room
-            </Button>
-          </div>
-          <p className="mt-6 text-xs text-gray-400">No account required • WebRTC encrypted video • Free forever</p>
-        </section>
+        {/* Hero Section */}
+        <section className="relative overflow-hidden pt-10 pb-8 sm:pt-14 sm:pb-10 bg-gradient-to-b from-slate-50/80 via-white to-white border-b border-slate-100/80">
+          {/* Subtle Ambient Background Glow */}
+          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-4xl h-64 bg-gradient-to-r from-accent-400/10 via-indigo-400/15 to-purple-400/10 blur-3xl pointer-events-none -z-10" />
 
-        {/* 📹 Video Chat Promo Card */}
-        <section className="max-w-4xl mx-auto px-4 py-4">
-          <div className="relative overflow-hidden bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 rounded-3xl p-6 sm:p-8 text-white border border-slate-800 shadow-xl flex flex-col md:flex-row items-center justify-between gap-6">
-            <div className="max-w-xl">
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-accent-500/20 border border-accent-400/30 text-accent-300 text-xs font-semibold mb-3">
-                <span className="w-1.5 h-1.5 rounded-full bg-accent-400 animate-ping" />
-                Omegle-Style Stranger Video
-              </div>
-              <h2 className="text-xl sm:text-2xl font-bold mb-2">Live 1-to-1 Random Video Chat</h2>
-              <p className="text-sm text-slate-300">
-                Talk face-to-face with random people. Direct peer-to-peer WebRTC connection with built-in instant skip (ESC) and 1-to-1 live text chat.
-              </p>
+          <div className="max-w-4xl mx-auto px-4 text-center">
+            {/* Live Online Badge */}
+            <div className="inline-flex items-center gap-2 bg-white/90 backdrop-blur-sm text-slate-700 text-xs font-medium px-3.5 py-1.5 rounded-full mb-5 border border-slate-200/80 shadow-xs">
+              <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
+              <span>
+                {totalOnlineUsers > 0
+                  ? `${totalOnlineUsers.toLocaleString()} ${totalOnlineUsers === 1 ? 'person' : 'people'} online now`
+                  : '100% Free & Anonymous'}
+              </span>
+              <span className="text-slate-300">•</span>
+              <span className="text-slate-500">No Signup Required</span>
             </div>
-            <Link href="/video" className="shrink-0 w-full sm:w-auto">
-              <Button size="lg" className="w-full sm:w-auto bg-white hover:bg-slate-100 text-slate-950 font-bold px-8 shadow-lg">
-                Try Video Chat Now →
-              </Button>
-            </Link>
+
+            {/* Headline */}
+            <h1 className="text-3xl sm:text-5xl md:text-6xl font-black text-slate-900 tracking-tight mb-4 leading-[1.15]">
+              Talk Freely.{' '}
+              <span className="bg-gradient-to-r from-accent-600 via-indigo-600 to-purple-600 bg-clip-text text-transparent">
+                Stay Anonymous.
+              </span>
+            </h1>
+
+            {/* Subtext */}
+            <p className="text-sm sm:text-base text-slate-500 max-w-lg mx-auto mb-8 leading-relaxed">
+              Instant 1-to-1 video calls with random strangers or join active topic chatrooms. Encrypted peer-to-peer, zero profile, zero tracking.
+            </p>
+
+            {/* Dual Launch Cards (Short & Attractive Showcase) */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-2xl mx-auto text-left">
+              
+              {/* Card 1: 📹 1-to-1 Random Video Chat */}
+              <div className="relative group overflow-hidden bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950 rounded-2xl p-5 sm:p-6 text-white border border-slate-800 shadow-xl hover:border-accent-500/60 hover:shadow-accent-500/10 transition-all duration-200 flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-2xl p-2 bg-white/10 rounded-xl">📹</span>
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-[11px] font-semibold">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                      LIVE
+                    </span>
+                  </div>
+                  <h3 className="text-lg font-bold text-white mb-1">Random Video Chat</h3>
+                  <p className="text-xs text-slate-300 mb-5 leading-relaxed">
+                    Face-to-face peer-to-peer WebRTC video with strangers. Instant skip with ESC key & in-call text chat.
+                  </p>
+                </div>
+                <Link href="/video" className="block">
+                  <Button size="md" className="w-full bg-accent-600 hover:bg-accent-500 text-white font-semibold text-xs sm:text-sm py-2.5 shadow-md shadow-accent-600/30 flex items-center justify-center gap-2">
+                    <span>Start Video Chat</span>
+                    <span className="transition-transform group-hover:translate-x-1">→</span>
+                  </Button>
+                </Link>
+              </div>
+
+              {/* Card 2: 💬 Topic Chatrooms */}
+              <div className="relative group overflow-hidden bg-white rounded-2xl p-5 sm:p-6 border border-slate-200 shadow-md hover:border-accent-400 hover:shadow-lg transition-all duration-200 flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="text-2xl p-2 bg-accent-50 rounded-xl">💬</span>
+                    <span className="px-2.5 py-0.5 rounded-full bg-slate-100 text-slate-600 text-[11px] font-medium border border-slate-200/60">
+                      {trendingRooms.length} Active Rooms
+                    </span>
+                  </div>
+                  <h3 className="text-lg font-bold text-slate-900 mb-1">Topic Chatrooms</h3>
+                  <p className="text-xs text-slate-500 mb-5 leading-relaxed">
+                    Join live discussions on tech, gaming, fun, or create your own instant chatroom in seconds.
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <Link href="/chat" className="flex-1">
+                    <Button size="md" variant="secondary" className="w-full text-xs sm:text-sm py-2.5 flex items-center justify-center gap-1.5 font-semibold">
+                      <span>Explore Rooms</span>
+                      <span className="transition-transform group-hover:translate-x-1">→</span>
+                    </Button>
+                  </Link>
+                  <Button
+                    size="md"
+                    variant="ghost"
+                    className="px-3 border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold"
+                    onClick={() => setModalOpen(true)}
+                    title="Create a new chatroom"
+                  >
+                    + New
+                  </Button>
+                </div>
+              </div>
+
+            </div>
           </div>
         </section>
 
-        {/* 🔥 Trending Rooms based on active users */}
-        <section className="max-w-4xl mx-auto px-4 py-10">
-          <div className="flex items-center justify-between mb-6">
+        {/* 🔥 Trending Chatrooms Section */}
+        <section className="max-w-4xl mx-auto px-4 py-8 sm:py-10">
+          <div className="flex items-center justify-between mb-5">
             <div>
-              <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+              <h2 className="text-xl sm:text-2xl font-bold text-slate-900 flex items-center gap-2">
                 <span>🔥</span> Trending Chatrooms
               </h2>
-              <p className="text-sm text-gray-500 mt-1">
-                Ranked live by active users in each room
+              <p className="text-xs text-slate-500 mt-0.5">
+                Active community rooms sorted live by current online users
               </p>
             </div>
             <button
               onClick={() => setModalOpen(true)}
-              className="text-xs font-semibold text-accent-600 hover:text-accent-700 bg-accent-50 hover:bg-accent-100 px-3 py-1.5 rounded-xl transition-colors flex items-center gap-1.5"
+              className="text-xs font-semibold text-accent-600 hover:text-accent-700 bg-accent-50 hover:bg-accent-100 px-3 py-1.5 rounded-xl transition-colors flex items-center gap-1"
             >
-              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-              </svg>
-              <span>Create Room</span>
+              <span>+ Create Room</span>
             </button>
           </div>
 
           {loading ? (
-            <div className="flex justify-center py-12">
+            <div className="flex justify-center py-10">
               <Spinner />
             </div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3.5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
               {topTrending.map((room) => {
                 const emoji = CATEGORY_EMOJIS[room.category] || '💬';
                 return (
@@ -136,42 +158,40 @@ export default function HomePage() {
                     key={room.slug}
                     href={`/room/${room.slug}`}
                     prefetch={false}
-                    className="group flex flex-col justify-between p-4 bg-white border border-gray-100 rounded-2xl hover:border-accent-300 hover:shadow-md transition-all duration-150 relative overflow-hidden"
+                    className="group flex flex-col justify-between p-3.5 bg-white border border-slate-100 rounded-xl hover:border-accent-300 hover:shadow-md transition-all duration-150 relative overflow-hidden"
                   >
-                    <div className="flex items-start justify-between gap-2 mb-2">
+                    <div className="flex items-start justify-between gap-2 mb-1.5">
                       <div className="flex items-center gap-2.5 min-w-0">
-                        <span className="text-2xl p-2 bg-gray-50 rounded-xl group-hover:scale-110 transition-transform">
+                        <span className="text-xl p-1.5 bg-slate-50 rounded-lg group-hover:scale-110 transition-transform">
                           {emoji}
                         </span>
                         <div className="min-w-0">
-                          <h3 className="font-semibold text-gray-900 group-hover:text-accent-600 transition-colors text-sm truncate">
+                          <h3 className="font-semibold text-slate-900 group-hover:text-accent-600 transition-colors text-xs sm:text-sm truncate">
                             {room.name}
                           </h3>
-                          <span className="text-xs text-gray-400 capitalize">
+                          <span className="text-[10px] text-slate-400 capitalize">
                             {room.category}
                           </span>
                         </div>
                       </div>
 
                       {room.activeUserCount > 0 ? (
-                        <span className="inline-flex items-center gap-1 text-xs font-semibold text-green-700 bg-green-50 px-2 py-0.5 rounded-full shrink-0">
-                          <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse" />
-                          {room.activeUserCount} online
+                        <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full shrink-0">
+                          <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse" />
+                          {room.activeUserCount}
                         </span>
                       ) : (
-                        <span className="text-xs text-gray-400 shrink-0">
-                          Open
-                        </span>
+                        <span className="text-[11px] text-slate-400 shrink-0">Open</span>
                       )}
                     </div>
 
                     {room.description && (
-                      <p className="text-xs text-gray-500 line-clamp-1 mb-2">
+                      <p className="text-[11px] text-slate-500 line-clamp-1 mb-2">
                         {room.description}
                       </p>
                     )}
 
-                    <div className="mt-auto pt-2 border-t border-gray-50 flex items-center justify-between text-xs text-accent-600 font-medium">
+                    <div className="mt-auto pt-1.5 border-t border-slate-50 flex items-center justify-between text-[11px] text-accent-600 font-medium">
                       <span>Join Room</span>
                       <span className="group-hover:translate-x-1 transition-transform">→</span>
                     </div>
@@ -181,43 +201,51 @@ export default function HomePage() {
             </div>
           )}
 
-          <div className="text-center mt-6">
+          <div className="text-center mt-5">
             <Link href="/chat">
-              <Button variant="secondary" size="sm" className="px-6">
-                View All Rooms ({trendingRooms.length}) →
+              <Button variant="secondary" size="sm" className="px-5 text-xs font-semibold text-slate-700">
+                Browse All Rooms ({trendingRooms.length}) →
               </Button>
             </Link>
           </div>
         </section>
 
-        {/* How it works */}
-        <section className="bg-gray-50 py-16">
+        {/* 🔒 Quick Trust & Privacy Strip (Clean, Short 3-Point Bar) */}
+        <section className="border-t border-slate-100 bg-slate-50/70 py-8">
           <div className="max-w-4xl mx-auto px-4">
-            <h2 className="text-2xl font-bold text-gray-900 mb-10 text-center">How it works</h2>
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-              {HOW_IT_WORKS.map((item) => (
-                <div key={item.step} className="text-center">
-                  <div className="w-10 h-10 bg-accent-600 text-white rounded-full flex items-center justify-center text-lg font-bold mx-auto mb-3">
-                    {item.step}
-                  </div>
-                  <p className="text-gray-600 text-sm">{item.text}</p>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-center sm:text-left">
+              
+              <div className="flex items-center sm:items-start gap-3 p-3 bg-white rounded-xl border border-slate-200/60 shadow-2xs">
+                <span className="text-2xl p-2 bg-accent-50 rounded-lg shrink-0">⚡</span>
+                <div>
+                  <h4 className="text-xs sm:text-sm font-bold text-slate-900">Zero Signup</h4>
+                  <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">
+                    No email, password, or profile. Instant anonymous identity on every visit.
+                  </p>
                 </div>
-              ))}
-            </div>
-          </div>
-        </section>
+              </div>
 
-        {/* Privacy note */}
-        <section className="max-w-4xl mx-auto px-4 py-16 text-center">
-          <div className="bg-white border border-gray-100 rounded-2xl p-8 shadow-sm">
-            <span className="text-3xl mb-4 block">🔒</span>
-            <h2 className="text-xl font-bold text-gray-900 mb-3">Your Privacy Matters</h2>
-            <p className="text-gray-500 max-w-lg mx-auto">
-              No account required. Video calls are direct peer-to-peer WebRTC connections without intermediate video recording or storage.
-            </p>
-            <Link href="/privacy" className="inline-flex items-center gap-1 mt-4 text-sm text-accent-600 hover:text-accent-700 font-medium">
-              Learn more →
-            </Link>
+              <div className="flex items-center sm:items-start gap-3 p-3 bg-white rounded-xl border border-slate-200/60 shadow-2xs">
+                <span className="text-2xl p-2 bg-emerald-50 rounded-lg shrink-0">🔒</span>
+                <div>
+                  <h4 className="text-xs sm:text-sm font-bold text-slate-900">P2P Encrypted</h4>
+                  <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">
+                    Direct browser-to-browser WebRTC video calls with zero server recordings.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center sm:items-start gap-3 p-3 bg-white rounded-xl border border-slate-200/60 shadow-2xs">
+                <span className="text-2xl p-2 bg-purple-50 rounded-lg shrink-0">🛡️</span>
+                <div>
+                  <h4 className="text-xs sm:text-sm font-bold text-slate-900">Safe & Free</h4>
+                  <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">
+                    Instant user skip, mute, reporting, and 100% free anonymous communication.
+                  </p>
+                </div>
+              </div>
+
+            </div>
           </div>
         </section>
       </main>

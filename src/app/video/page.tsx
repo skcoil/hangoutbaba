@@ -36,7 +36,7 @@ export default function VideoChatPage() {
 
   const [chatInput, setChatInput] = useState('');
   const [isChatOpen, setIsChatOpen] = useState(false);
-  const [videoFit, setVideoFit] = useState<'cover' | 'contain'>('cover');
+  const [videoFit, setVideoFit] = useState<'contain' | 'cover'>('contain');
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   // Attach local media stream to local video element
@@ -261,11 +261,11 @@ export default function VideoChatPage() {
                 {status === 'connected' && (
                   <button
                     type="button"
-                    onClick={() => setVideoFit((f) => (f === 'cover' ? 'contain' : 'cover'))}
+                    onClick={() => setVideoFit((f) => (f === 'contain' ? 'cover' : 'contain'))}
                     className="px-2 py-1 bg-black/65 hover:bg-black/85 backdrop-blur-md rounded-lg border border-white/15 text-[10px] sm:text-xs text-slate-200 transition-colors flex items-center gap-1 shadow-md active:scale-95"
-                    title={videoFit === 'cover' ? 'Switch to Fit (show entire camera uncropped)' : 'Switch to Fill (cover stage)'}
+                    title={videoFit === 'contain' ? 'Current: Original / No Crop (Click to Fill & Crop)' : 'Current: Fill / Cropped (Click for Original)'}
                   >
-                    <span>{videoFit === 'cover' ? '⊡ Fit' : '⛶ Fill'}</span>
+                    <span>{videoFit === 'contain' ? '⊡ Original' : '⛶ Cropped'}</span>
                   </button>
                 )}
                 <button
@@ -279,14 +279,14 @@ export default function VideoChatPage() {
                 </button>
               </div>
 
-              {/* Local Self-Video Preview (PIP in Bottom-Right Corner) */}
-              <div className="absolute bottom-2.5 sm:bottom-4 right-2.5 sm:right-4 z-20 w-24 sm:w-36 md:w-44 aspect-[4/3] rounded-xl sm:rounded-2xl overflow-hidden border-2 border-slate-700/80 bg-slate-950 shadow-2xl transition-all">
+              {/* Local Self-Video Preview (PIP in Bottom-Right Corner - No Crop, No Stretch) */}
+              <div className="absolute bottom-2.5 sm:bottom-4 right-2.5 sm:right-4 z-20 w-24 sm:w-36 md:w-44 aspect-video rounded-xl sm:rounded-2xl overflow-hidden border-2 border-slate-700/80 bg-slate-950 shadow-2xl transition-all">
                 <video
                   ref={localVideoRef}
                   autoPlay
                   playsInline
                   muted
-                  className={`absolute inset-0 w-full h-full object-cover scale-x-[-1] ${isVideoOff ? 'hidden' : 'block'}`}
+                  className={`absolute inset-0 w-full h-full object-contain bg-black scale-x-[-1] ${isVideoOff ? 'hidden' : 'block'}`}
                 />
                 {isVideoOff && (
                   <div className="w-full h-full flex flex-col items-center justify-center text-slate-500 text-[10px]">

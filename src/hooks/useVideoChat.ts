@@ -2,7 +2,14 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { SessionData, VideoCallStatus, VideoChatMessage } from '@/types';
 import { db, isFirebaseConfigured } from '@/lib/firebase';
-import { RTC_CONFIG, stopMediaStream, setStreamAudioEnabled, setStreamVideoEnabled } from '@/lib/webrtc';
+import {
+  RTC_CONFIG,
+  getRTCConfig,
+  sanitizeIceCandidate,
+  stopMediaStream,
+  setStreamAudioEnabled,
+  setStreamVideoEnabled,
+} from '@/lib/webrtc';
 import {
   collection,
   doc,
@@ -35,6 +42,14 @@ export function useVideoChat(session: SessionData | null) {
   const currentCallIdRef = useRef<string | null>(null);
   const queuedCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
   const isRemoteDescSetRef = useRef(false);
+  const rtcConfigRef = useRef<RTCConfiguration>(RTC_CONFIG);
+
+  // Fetch best available dynamic/custom RTC configuration (STUN + TURN)
+  useEffect(() => {
+    getRTCConfig().then((cfg) => {
+      rtcConfigRef.current = cfg;
+    });
+  }, []);
 
   // Firestore listeners
   const unsubQueueRef = useRef<(() => void) | null>(null);
@@ -173,7 +188,7 @@ export function useVideoChat(session: SessionData | null) {
    * Setup WebRTC peer connection with local tracks and event handlers
    */
   const setupPeerConnection = useCallback((callId: string): RTCPeerConnection => {
-    const pc = new RTCPeerConnection(RTC_CONFIG);
+    const pc = new RTCPeerConnection(rtcConfigRef.current || RTC_CONFIG);
     pcRef.current = pc;
     isRemoteDescSetRef.current = false;
     queuedCandidatesRef.current = [];
@@ -196,11 +211,29 @@ export function useVideoChat(session: SessionData | null) {
     // Connection state changes
     pc.onconnectionstatechange = () => {
       const state = pc.connectionState;
+      console.log('[WebRTC] Peer Connection State:', state);
       if (state === 'connected') {
         setStatus('connected');
       } else if (state === 'disconnected' || state === 'failed' || state === 'closed') {
         setStatus('ended');
       }
+    };
+
+    // ICE Connection state changes (crucial for diagnosing NAT & cross-network traversal)
+    pc.oniceconnectionstatechange = () => {
+      const iceState = pc.iceConnectionState;
+      console.log('[WebRTC] ICE Connection State:', iceState);
+      if (iceState === 'connected' || iceState === 'completed') {
+        setStatus('connected');
+      } else if (iceState === 'failed') {
+        console.warn('[WebRTC] ICE Connection failed across network');
+        setStatus('ended');
+      }
+    };
+
+    // Log ICE candidate error (e.g. STUN/TURN unreachable)
+    pc.onicecandidateerror = (e: any) => {
+      console.warn('[WebRTC] ICE candidate error:', e.errorCode, e.errorText, e.url);
     };
 
     // Listen to in-call text chat messages
@@ -250,21 +283,35 @@ export function useVideoChat(session: SessionData | null) {
       unsubCandidatesRef.current = onSnapshot(calleeCandidatesCol, (snapshot) => {
         snapshot.docChanges().forEach((change) => {
           if (change.type === 'added') {
-            const candidate = new RTCIceCandidate(change.doc.data());
-            if (isRemoteDescSetRef.current && pc.remoteDescription) {
-              pc.addIceCandidate(candidate).catch((e) => console.warn('[WebRTC] addIceCandidate error:', e));
+            const data = change.doc.data();
+            if (!data || !data.candidate) return;
+
+            const candidateInit: RTCIceCandidateInit = {
+              candidate: data.candidate,
+              sdpMid: data.sdpMid ?? undefined,
+              sdpMLineIndex: data.sdpMLineIndex ?? undefined,
+              usernameFragment: data.usernameFragment ?? undefined,
+            };
+
+            if (isRemoteDescSetRef.current && pc.remoteDescription && pc.remoteDescription.type) {
+              pc.addIceCandidate(new RTCIceCandidate(candidateInit)).catch((e) =>
+                console.warn('[WebRTC] addIceCandidate error:', e)
+              );
             } else {
-              queuedCandidatesRef.current.push(candidate);
+              queuedCandidatesRef.current.push(candidateInit);
             }
           }
         });
       });
 
-      // Send local ICE candidates to callerCandidates
+      // Send local ICE candidates to callerCandidates with sanitization
       const callerCandidatesCol = collection(db, 'video_calls', callId, 'callerCandidates');
       pc.onicecandidate = (event) => {
         if (event.candidate) {
-          addDoc(callerCandidatesCol, event.candidate.toJSON()).catch(() => {});
+          const cleanCandidate = sanitizeIceCandidate(event.candidate);
+          addDoc(callerCandidatesCol, cleanCandidate).catch((e) => {
+            console.warn('[WebRTC] Error saving caller candidate:', e);
+          });
         }
       };
 
@@ -285,11 +332,13 @@ export function useVideoChat(session: SessionData | null) {
           await pc.setRemoteDescription(rtcSessionDesc);
           isRemoteDescSetRef.current = true;
 
-          // Flush any queued candidates
+          // Flush any queued candidates safely
           while (queuedCandidatesRef.current.length > 0) {
-            const candidate = queuedCandidatesRef.current.shift();
-            if (candidate) {
-              pc.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
+            const candidateInit = queuedCandidatesRef.current.shift();
+            if (candidateInit) {
+              pc.addIceCandidate(new RTCIceCandidate(candidateInit)).catch((e) => {
+                console.warn('[WebRTC] Error applying queued candidate:', e);
+              });
             }
           }
         }
@@ -321,21 +370,35 @@ export function useVideoChat(session: SessionData | null) {
       unsubCandidatesRef.current = onSnapshot(callerCandidatesCol, (snapshot) => {
         snapshot.docChanges().forEach((change) => {
           if (change.type === 'added') {
-            const candidate = new RTCIceCandidate(change.doc.data());
-            if (isRemoteDescSetRef.current && pc.remoteDescription) {
-              pc.addIceCandidate(candidate).catch((e) => console.warn('[WebRTC] addIceCandidate error:', e));
+            const data = change.doc.data();
+            if (!data || !data.candidate) return;
+
+            const candidateInit: RTCIceCandidateInit = {
+              candidate: data.candidate,
+              sdpMid: data.sdpMid ?? undefined,
+              sdpMLineIndex: data.sdpMLineIndex ?? undefined,
+              usernameFragment: data.usernameFragment ?? undefined,
+            };
+
+            if (isRemoteDescSetRef.current && pc.remoteDescription && pc.remoteDescription.type) {
+              pc.addIceCandidate(new RTCIceCandidate(candidateInit)).catch((e) =>
+                console.warn('[WebRTC] addIceCandidate error:', e)
+              );
             } else {
-              queuedCandidatesRef.current.push(candidate);
+              queuedCandidatesRef.current.push(candidateInit);
             }
           }
         });
       });
 
-      // Send local ICE candidates to calleeCandidates
+      // Send local ICE candidates to calleeCandidates with sanitization
       const calleeCandidatesCol = collection(db, 'video_calls', callId, 'calleeCandidates');
       pc.onicecandidate = (event) => {
         if (event.candidate) {
-          addDoc(calleeCandidatesCol, event.candidate.toJSON()).catch(() => {});
+          const cleanCandidate = sanitizeIceCandidate(event.candidate);
+          addDoc(calleeCandidatesCol, cleanCandidate).catch((e) => {
+            console.warn('[WebRTC] Error saving callee candidate:', e);
+          });
         }
       };
 
@@ -348,11 +411,13 @@ export function useVideoChat(session: SessionData | null) {
           await pc.setRemoteDescription(rtcSessionDesc);
           isRemoteDescSetRef.current = true;
 
-          // Flush any queued candidates
+          // Flush any queued candidates safely
           while (queuedCandidatesRef.current.length > 0) {
-            const candidate = queuedCandidatesRef.current.shift();
-            if (candidate) {
-              pc.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
+            const candidateInit = queuedCandidatesRef.current.shift();
+            if (candidateInit) {
+              pc.addIceCandidate(new RTCIceCandidate(candidateInit)).catch((e) => {
+                console.warn('[WebRTC] Error applying queued candidate:', e);
+              });
             }
           }
 

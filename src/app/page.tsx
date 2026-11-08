@@ -22,9 +22,9 @@ const CATEGORY_EMOJIS: Record<string, string> = {
 
 const HOW_IT_WORKS = [
   { step: '1', text: 'Open the site' },
-  { step: '2', text: 'Get a random username automatically' },
-  { step: '3', text: 'Join any chatroom' },
-  { step: '4', text: 'Start talking instantly' },
+  { step: '2', text: 'Get an anonymous identity instantly' },
+  { step: '3', text: 'Join a room or start 1-to-1 video' },
+  { step: '4', text: 'Talk freely with real people' },
 ];
 
 export default function HomePage() {
@@ -40,44 +40,69 @@ export default function HomePage() {
 
       <main className="flex-1">
         {/* Hero */}
-        <section className="max-w-4xl mx-auto px-4 pt-20 pb-16 text-center">
-          <div className="inline-flex items-center gap-2 bg-accent-50 text-accent-700 text-sm font-medium px-4 py-1.5 rounded-full mb-6">
-            <span className="w-2 h-2 bg-green-400 rounded-full animate-pulse" />
+        <section className="max-w-4xl mx-auto px-4 pt-16 pb-12 text-center">
+          <div className="inline-flex items-center gap-2 bg-accent-50 text-accent-700 text-sm font-medium px-4 py-1.5 rounded-full mb-6 border border-accent-200/50">
+            <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
             <span>
               {totalOnlineUsers > 0
-                ? `${totalOnlineUsers.toLocaleString()} ${totalOnlineUsers === 1 ? 'person' : 'people'} chatting right now`
-                : '100% Free Anonymous Chatrooms'}
+                ? `${totalOnlineUsers.toLocaleString()} ${totalOnlineUsers === 1 ? 'person' : 'people'} online right now`
+                : '100% Free Anonymous Video & Text Chat'}
             </span>
           </div>
-          <h1 className="text-5xl md:text-6xl font-bold text-gray-900 mb-6 leading-tight">
+          <h1 className="text-4xl sm:text-5xl md:text-6xl font-extrabold text-gray-900 mb-6 leading-tight">
             Talk freely.
             <br />
-            <span className="text-accent-600">Stay anonymous.</span>
+            <span className="text-accent-600">Stay completely anonymous.</span>
           </h1>
-          <p className="text-lg text-gray-500 mb-10 max-w-xl mx-auto">
-            Join conversations with real people without creating an account.
-            No signup. No profile. No personal information required.
+          <p className="text-base sm:text-lg text-gray-500 mb-8 max-w-xl mx-auto leading-relaxed">
+            Join group chatrooms or start <strong>random 1-to-1 video calls</strong> with strangers across the globe. No signup, no profile, zero trackers.
           </p>
-          <div className="flex flex-col sm:flex-row gap-3 justify-center">
-            <Link href="/chat">
-              <Button size="lg" className="w-full sm:w-auto px-8">
-                Start Chatting →
+          <div className="flex flex-col sm:flex-row gap-3 justify-center items-center">
+            <Link href="/video" className="w-full sm:w-auto">
+              <Button size="lg" className="w-full sm:w-auto px-8 bg-gradient-to-r from-accent-600 to-indigo-600 hover:from-accent-700 hover:to-indigo-700 shadow-md shadow-accent-600/20 flex items-center justify-center gap-2">
+                <span>📹</span> Random Video Chat (New)
+              </Button>
+            </Link>
+            <Link href="/chat" className="w-full sm:w-auto">
+              <Button size="lg" variant="secondary" className="w-full sm:w-auto px-7 flex items-center justify-center gap-2">
+                <span>💬</span> Browse Rooms
               </Button>
             </Link>
             <Button
               size="lg"
               variant="secondary"
-              className="w-full sm:w-auto px-8 flex items-center justify-center gap-2"
+              className="w-full sm:w-auto px-6 flex items-center justify-center gap-2 text-gray-600"
               onClick={() => setModalOpen(true)}
             >
-              <span>✨</span> Create New Room
+              <span>✨</span> New Room
             </Button>
           </div>
-          <p className="mt-6 text-sm text-gray-400">No signup • No profile • Free forever</p>
+          <p className="mt-6 text-xs text-gray-400">No account required • WebRTC encrypted video • Free forever</p>
+        </section>
+
+        {/* 📹 Video Chat Promo Card */}
+        <section className="max-w-4xl mx-auto px-4 py-4">
+          <div className="relative overflow-hidden bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 rounded-3xl p-6 sm:p-8 text-white border border-slate-800 shadow-xl flex flex-col md:flex-row items-center justify-between gap-6">
+            <div className="max-w-xl">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-accent-500/20 border border-accent-400/30 text-accent-300 text-xs font-semibold mb-3">
+                <span className="w-1.5 h-1.5 rounded-full bg-accent-400 animate-ping" />
+                Omegle-Style Stranger Video
+              </div>
+              <h2 className="text-xl sm:text-2xl font-bold mb-2">Live 1-to-1 Random Video Chat</h2>
+              <p className="text-sm text-slate-300">
+                Talk face-to-face with random people. Direct peer-to-peer WebRTC connection with built-in instant skip (ESC) and 1-to-1 live text chat.
+              </p>
+            </div>
+            <Link href="/video" className="shrink-0 w-full sm:w-auto">
+              <Button size="lg" className="w-full sm:w-auto bg-white hover:bg-slate-100 text-slate-950 font-bold px-8 shadow-lg">
+                Try Video Chat Now →
+              </Button>
+            </Link>
+          </div>
         </section>
 
         {/* 🔥 Trending Rooms based on active users */}
-        <section className="max-w-4xl mx-auto px-4 py-12">
+        <section className="max-w-4xl mx-auto px-4 py-10">
           <div className="flex items-center justify-between mb-6">
             <div>
               <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
@@ -188,8 +213,7 @@ export default function HomePage() {
             <span className="text-3xl mb-4 block">🔒</span>
             <h2 className="text-xl font-bold text-gray-900 mb-3">Your Privacy Matters</h2>
             <p className="text-gray-500 max-w-lg mx-auto">
-              No account required. Your identity is temporary and anonymous.
-              We only process what&apos;s necessary to keep the service running safely.
+              No account required. Video calls are direct peer-to-peer WebRTC connections without intermediate video recording or storage.
             </p>
             <Link href="/privacy" className="inline-flex items-center gap-1 mt-4 text-sm text-accent-600 hover:text-accent-700 font-medium">
               Learn more →

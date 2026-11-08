@@ -87,3 +87,47 @@ export interface ApiError {
   error: string;
   code?: string;
 }
+
+// ============================================================
+// Video Chat Types (WebRTC & Firestore Signaling)
+// ============================================================
+
+export type VideoCallStatus = 'idle' | 'searching' | 'connecting' | 'connected' | 'ended' | 'error';
+
+export interface VideoQueueDoc {
+  sessionId: string;
+  username: string;
+  status: 'waiting' | 'matched';
+  updatedAt: number;
+  callId?: string | null;
+  peerId?: string | null;
+  peerUsername?: string | null;
+  role?: 'caller' | 'callee';
+  matchedAt?: number;
+}
+
+export interface VideoCallDoc {
+  id: string;
+  callerId: string;
+  callerUsername: string;
+  calleeId: string;
+  calleeUsername: string;
+  status: 'connecting' | 'connected' | 'ended';
+  createdAt: number;
+  offer?: {
+    type: 'offer';
+    sdp: string;
+  };
+  answer?: {
+    type: 'answer';
+    sdp: string;
+  };
+}
+
+export interface VideoChatMessage {
+  id: string;
+  senderId: string;
+  senderUsername: string;
+  content: string;
+  timestamp: number;
+}

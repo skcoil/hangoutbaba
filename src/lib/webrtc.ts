@@ -36,7 +36,30 @@ export async function getRTCConfig(): Promise<RTCConfiguration> {
   }
 
   pendingConfigPromise = (async (): Promise<RTCConfiguration> => {
-    // 1. If user provided a Metered Domain & API key in env, fetch dynamic TURN servers with dedicated free 20GB/mo quota
+    // 1. If user provided custom static TURN credentials in env (e.g. Oracle Cloud Always Free CoTURN)
+    const customTurnUrl = process.env.NEXT_PUBLIC_TURN_URL;
+    const customTurnUser = process.env.NEXT_PUBLIC_TURN_USERNAME;
+    const customTurnPass = process.env.NEXT_PUBLIC_TURN_CREDENTIAL;
+
+    if (customTurnUrl && customTurnUser && customTurnPass) {
+      console.log('[WebRTC] Using dedicated lifetime CoTURN server on Oracle Cloud...');
+      cachedRTCConfig = {
+        iceServers: [
+          {
+            urls: customTurnUrl.split(',').map((u) => u.trim()),
+            username: customTurnUser,
+            credential: customTurnPass,
+          },
+          ...DEFAULT_STUN_SERVERS,
+        ],
+        iceTransportPolicy: 'all',
+        iceCandidatePoolSize: 10,
+      };
+      lastFetchTime = Date.now();
+      return cachedRTCConfig;
+    }
+
+    // 2. If user provided a Metered Domain & API key in env, fetch dynamic TURN servers
     const meteredDomain = process.env.NEXT_PUBLIC_METERED_DOMAIN;
     const meteredApiKey = process.env.NEXT_PUBLIC_METERED_API_KEY;
 
@@ -67,28 +90,6 @@ export async function getRTCConfig(): Promise<RTCConfiguration> {
       } catch (e) {
         console.warn('[WebRTC] Failed to fetch dynamic Metered TURN credentials, using fallback:', e);
       }
-    }
-
-    // 2. If user provided custom static TURN credentials in env
-    const customTurnUrl = process.env.NEXT_PUBLIC_TURN_URL;
-    const customTurnUser = process.env.NEXT_PUBLIC_TURN_USERNAME;
-    const customTurnPass = process.env.NEXT_PUBLIC_TURN_CREDENTIAL;
-
-    if (customTurnUrl && customTurnUser && customTurnPass) {
-      cachedRTCConfig = {
-        iceServers: [
-          {
-            urls: customTurnUrl.split(',').map((u) => u.trim()),
-            username: customTurnUser,
-            credential: customTurnPass,
-          },
-          ...DEFAULT_STUN_SERVERS,
-        ],
-        iceTransportPolicy: 'all',
-        iceCandidatePoolSize: 10,
-      };
-      lastFetchTime = Date.now();
-      return cachedRTCConfig;
     }
 
     cachedRTCConfig = {

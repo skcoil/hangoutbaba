@@ -17,54 +17,92 @@ export const DEFAULT_STUN_SERVERS: RTCIceServer[] = [
   { urls: 'stun:stun.sipgate.net:3478' },
 ];
 
+let cachedRTCConfig: RTCConfiguration | null = null;
+let pendingConfigPromise: Promise<RTCConfiguration> | null = null;
+let lastFetchTime = 0;
+const CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes cache
+
 /**
  * Get active WebRTC configuration, supporting custom TURN credentials or dynamic Metered API
  */
 export async function getRTCConfig(): Promise<RTCConfiguration> {
-  // 1. If user provided a Metered Domain & API key in env, fetch dynamic TURN servers with dedicated free 20GB/mo quota
-  const meteredDomain = process.env.NEXT_PUBLIC_METERED_DOMAIN;
-  const meteredApiKey = process.env.NEXT_PUBLIC_METERED_API_KEY;
+  const now = Date.now();
+  if (cachedRTCConfig && now - lastFetchTime < CACHE_TTL_MS) {
+    return cachedRTCConfig;
+  }
 
-  if (meteredDomain && meteredApiKey) {
-    try {
-      const res = await fetch(`https://${meteredDomain}.metered.live/api/v1/turn/credentials?apiKey=${meteredApiKey}`);
-      if (res.ok) {
-        const dynamicServers: RTCIceServer[] = await res.json();
-        if (Array.isArray(dynamicServers) && dynamicServers.length > 0) {
-          return {
-            iceServers: [...dynamicServers, ...DEFAULT_STUN_SERVERS],
-            iceTransportPolicy: 'all',
-          };
+  if (pendingConfigPromise) {
+    return pendingConfigPromise;
+  }
+
+  pendingConfigPromise = (async (): Promise<RTCConfiguration> => {
+    // 1. If user provided a Metered Domain & API key in env, fetch dynamic TURN servers with dedicated free 20GB/mo quota
+    const meteredDomain = process.env.NEXT_PUBLIC_METERED_DOMAIN;
+    const meteredApiKey = process.env.NEXT_PUBLIC_METERED_API_KEY;
+
+    if (meteredDomain && meteredApiKey) {
+      try {
+        const cleanDomain = meteredDomain
+          .replace(/^https?:\/\//, '')
+          .replace(/\.metered\.live\/?$/, '')
+          .trim();
+        const endpoint = `https://${cleanDomain}.metered.live/api/v1/turn/credentials?apiKey=${meteredApiKey.trim()}`;
+        console.log('[WebRTC] Requesting dynamic Metered TURN credentials...');
+        const res = await fetch(endpoint);
+        if (res.ok) {
+          const dynamicServers: RTCIceServer[] = await res.json();
+          if (Array.isArray(dynamicServers) && dynamicServers.length > 0) {
+            console.log(`[WebRTC] Loaded ${dynamicServers.length} Metered TURN servers successfully.`);
+            cachedRTCConfig = {
+              iceServers: [...dynamicServers, ...DEFAULT_STUN_SERVERS],
+              iceTransportPolicy: 'all',
+              iceCandidatePoolSize: 10,
+            };
+            lastFetchTime = Date.now();
+            return cachedRTCConfig;
+          }
+        } else {
+          console.warn('[WebRTC] Metered API returned status:', res.status, res.statusText);
         }
+      } catch (e) {
+        console.warn('[WebRTC] Failed to fetch dynamic Metered TURN credentials, using fallback:', e);
       }
-    } catch (e) {
-      console.warn('[WebRTC] Failed to fetch dynamic Metered TURN credentials, using default fallback:', e);
     }
-  }
 
-  // 2. If user provided custom static TURN credentials in env
-  const customTurnUrl = process.env.NEXT_PUBLIC_TURN_URL;
-  const customTurnUser = process.env.NEXT_PUBLIC_TURN_USERNAME;
-  const customTurnPass = process.env.NEXT_PUBLIC_TURN_CREDENTIAL;
+    // 2. If user provided custom static TURN credentials in env
+    const customTurnUrl = process.env.NEXT_PUBLIC_TURN_URL;
+    const customTurnUser = process.env.NEXT_PUBLIC_TURN_USERNAME;
+    const customTurnPass = process.env.NEXT_PUBLIC_TURN_CREDENTIAL;
 
-  if (customTurnUrl && customTurnUser && customTurnPass) {
-    return {
-      iceServers: [
-        {
-          urls: customTurnUrl.split(',').map((u) => u.trim()),
-          username: customTurnUser,
-          credential: customTurnPass,
-        },
-        ...DEFAULT_STUN_SERVERS,
-      ],
+    if (customTurnUrl && customTurnUser && customTurnPass) {
+      cachedRTCConfig = {
+        iceServers: [
+          {
+            urls: customTurnUrl.split(',').map((u) => u.trim()),
+            username: customTurnUser,
+            credential: customTurnPass,
+          },
+          ...DEFAULT_STUN_SERVERS,
+        ],
+        iceTransportPolicy: 'all',
+        iceCandidatePoolSize: 10,
+      };
+      lastFetchTime = Date.now();
+      return cachedRTCConfig;
+    }
+
+    cachedRTCConfig = {
+      iceServers: DEFAULT_STUN_SERVERS,
       iceTransportPolicy: 'all',
+      iceCandidatePoolSize: 5,
     };
-  }
+    lastFetchTime = Date.now();
+    return cachedRTCConfig;
+  })().finally(() => {
+    pendingConfigPromise = null;
+  });
 
-  return {
-    iceServers: DEFAULT_STUN_SERVERS,
-    iceTransportPolicy: 'all',
-  };
+  return pendingConfigPromise;
 }
 
 export const RTC_CONFIG: RTCConfiguration = {

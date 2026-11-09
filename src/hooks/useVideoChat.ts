@@ -210,8 +210,10 @@ export function useVideoChat(session: SessionData | null) {
   /**
    * Setup WebRTC peer connection with local tracks and event handlers
    */
-  const setupPeerConnection = useCallback((callId: string): RTCPeerConnection => {
-    const pc = new RTCPeerConnection(rtcConfigRef.current || RTC_CONFIG);
+  const setupPeerConnection = useCallback(async (callId: string): Promise<RTCPeerConnection> => {
+    const config = await getRTCConfig();
+    rtcConfigRef.current = config;
+    const pc = new RTCPeerConnection(config);
     pcRef.current = pc;
     isRemoteDescSetRef.current = false;
     queuedCandidatesRef.current = [];
@@ -245,7 +247,7 @@ export function useVideoChat(session: SessionData | null) {
       console.log('[WebRTC] Peer Connection State:', state);
       if (state === 'connected') {
         setStatus('connected');
-      } else if (state === 'disconnected' || state === 'failed' || state === 'closed') {
+      } else if (state === 'failed' || state === 'closed') {
         setStatus('ended');
       }
     };
@@ -307,7 +309,7 @@ export function useVideoChat(session: SessionData | null) {
       setPartnerUsername(partnerName);
       setStatus('connecting');
 
-      const pc = setupPeerConnection(callId);
+      const pc = await setupPeerConnection(callId);
 
       // Listen for Callee ICE Candidates
       const calleeCandidatesCol = collection(db, 'video_calls', callId, 'calleeCandidates');
@@ -394,7 +396,7 @@ export function useVideoChat(session: SessionData | null) {
       setPartnerUsername(partnerName);
       setStatus('connecting');
 
-      const pc = setupPeerConnection(callId);
+      const pc = await setupPeerConnection(callId);
 
       // Listen for Caller ICE Candidates
       const callerCandidatesCol = collection(db, 'video_calls', callId, 'callerCandidates');

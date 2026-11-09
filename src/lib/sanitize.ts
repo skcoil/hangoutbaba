@@ -1,13 +1,8 @@
-import sanitizeHtml from 'sanitize-html';
-
 export function sanitizeMessage(input: string): string {
   if (typeof input !== 'string') return '';
 
-  // Strip all HTML
-  const cleaned = sanitizeHtml(input, {
-    allowedTags: [],
-    allowedAttributes: {},
-  });
+  // Strip all HTML tags in browser-safe way
+  const cleaned = input.replace(/<[^>]*>/g, '');
 
   // Normalize whitespace
   return cleaned.replace(/\s+/g, ' ').trim();

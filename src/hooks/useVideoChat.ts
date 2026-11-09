@@ -1,6 +1,6 @@
 'use client';
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { SessionData, VideoCallStatus, VideoChatMessage } from '@/types';
+import { SessionData, VideoCallStatus, VideoChatMessage, AttachedFilePayload } from '@/types';
 import { db, isFirebaseConfigured } from '@/lib/firebase';
 import {
   RTC_CONFIG,
@@ -35,9 +35,12 @@ export function useVideoChat(session: SessionData | null) {
   const [error, setError] = useState<string | null>(null);
   const [messages, setMessages] = useState<VideoChatMessage[]>([]);
   const [waitingCount, setWaitingCount] = useState<number>(0);
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
+  const [isFlippingCamera, setIsFlippingCamera] = useState(false);
 
   // References to keep mutable state across async callbacks
   const localStreamRef = useRef<MediaStream | null>(null);
+  const facingModeRef = useRef<'user' | 'environment'>('user');
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const currentCallIdRef = useRef<string | null>(null);
   const queuedCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
@@ -100,7 +103,7 @@ export function useVideoChat(session: SessionData | null) {
           video: {
             width: { ideal: 1280, max: 1920 },
             height: { ideal: 720, max: 1080 },
-            facingMode: 'user',
+            facingMode: facingModeRef.current,
           },
           audio: true,
         });
@@ -108,7 +111,7 @@ export function useVideoChat(session: SessionData | null) {
         console.warn('[useVideoChat] High-res getUserMedia failed, retrying with fallback constraints:', firstErr);
         try {
           stream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: 'user' },
+            video: { facingMode: facingModeRef.current },
             audio: true,
           });
         } catch (secondErr) {
@@ -135,6 +138,85 @@ export function useVideoChat(session: SessionData | null) {
       return null;
     }
   }, []);
+
+  /**
+   * Flip between front (user) and back (environment) camera without dropping call
+   */
+  const flipCamera = useCallback(async (): Promise<boolean> => {
+    if (isFlippingCamera || !navigator.mediaDevices?.getUserMedia) return false;
+    setIsFlippingCamera(true);
+
+    try {
+      const nextFacing: 'user' | 'environment' = facingModeRef.current === 'user' ? 'environment' : 'user';
+
+      let newStream: MediaStream;
+      try {
+        newStream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            facingMode: { exact: nextFacing },
+            width: { ideal: 1280, max: 1920 },
+            height: { ideal: 720, max: 1080 },
+          },
+          audio: false,
+        });
+      } catch (firstErr) {
+        console.warn('[useVideoChat] exact facingMode failed, falling back:', firstErr);
+        try {
+          newStream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: nextFacing },
+            audio: false,
+          });
+        } catch (secondErr) {
+          console.warn('[useVideoChat] facingMode fallback failed:', secondErr);
+          setIsFlippingCamera(false);
+          return false;
+        }
+      }
+
+      const newVideoTrack = newStream.getVideoTracks()[0];
+      if (!newVideoTrack) {
+        setIsFlippingCamera(false);
+        return false;
+      }
+
+      // Preserve isVideoOff state on new track
+      if (isVideoOff) {
+        newVideoTrack.enabled = false;
+      }
+
+      // Replace track on RTCPeerConnection sender if active call
+      if (pcRef.current) {
+        const senders = pcRef.current.getSenders();
+        const videoSender = senders.find((s) => s.track?.kind === 'video');
+        if (videoSender) {
+          await videoSender.replaceTrack(newVideoTrack);
+          console.log('[useVideoChat] Replaced video track with facingMode:', nextFacing);
+        }
+      }
+
+      // Stop old video track to release hardware
+      const currentStream = localStreamRef.current;
+      if (currentStream) {
+        currentStream.getVideoTracks().forEach((track) => track.stop());
+        const audioTracks = currentStream.getAudioTracks();
+        const combined = new MediaStream([...audioTracks, newVideoTrack]);
+        setLocalStream(combined);
+        localStreamRef.current = combined;
+      } else {
+        setLocalStream(newStream);
+        localStreamRef.current = newStream;
+      }
+
+      facingModeRef.current = nextFacing;
+      setFacingMode(nextFacing);
+      return true;
+    } catch (err) {
+      console.error('[useVideoChat] Failed to flip camera:', err);
+      return false;
+    } finally {
+      setIsFlippingCamera(false);
+    }
+  }, [isFlippingCamera, isVideoOff]);
 
   /**
    * Clean up WebRTC peer connection and active call listeners
@@ -282,6 +364,7 @@ export function useVideoChat(session: SessionData | null) {
           senderUsername: item.senderUsername || 'Anonymous',
           content: item.content || '',
           timestamp: item.timestamp || Date.now(),
+          file: item.file || undefined,
         });
       });
       setMessages(loaded);
@@ -691,21 +774,32 @@ export function useVideoChat(session: SessionData | null) {
   }, [isVideoOff]);
 
   /**
-   * Send 1-to-1 in-call text message
+   * Send 1-to-1 in-call text message (with optional attached file/image)
    */
   const sendMessage = useCallback(
-    async (content: string) => {
+    async (content: string, attachedFile?: AttachedFilePayload | null) => {
       const trimmed = content.trim();
-      if (!trimmed || !currentCallIdRef.current || !session) return;
+      if ((!trimmed && !attachedFile) || !currentCallIdRef.current || !session) return;
 
       try {
         const messagesCol = collection(db, 'video_calls', currentCallIdRef.current, 'messages');
-        await addDoc(messagesCol, {
+        const payload: Record<string, any> = {
           senderId: session.id,
           senderUsername: session.username,
-          content: trimmed.slice(0, 300),
+          content: trimmed.slice(0, 500),
           timestamp: Date.now(),
-        });
+        };
+
+        if (attachedFile) {
+          payload.file = {
+            name: attachedFile.name.slice(0, 100),
+            type: attachedFile.type,
+            size: attachedFile.size,
+            data: attachedFile.data,
+          };
+        }
+
+        await addDoc(messagesCol, payload);
       } catch (err) {
         console.error('[useVideoChat] Send message failed:', err);
       }
@@ -746,6 +840,9 @@ export function useVideoChat(session: SessionData | null) {
     error,
     messages,
     waitingCount,
+    facingMode,
+    isFlippingCamera,
+    flipCamera,
     initLocalMedia,
     startSearching,
     nextStranger,

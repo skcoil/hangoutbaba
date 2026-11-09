@@ -124,10 +124,18 @@ export interface VideoCallDoc {
   };
 }
 
+export interface AttachedFilePayload {
+  name: string;
+  type: string;
+  size: number;
+  data: string;
+}
+
 export interface VideoChatMessage {
   id: string;
   senderId: string;
   senderUsername: string;
   content: string;
   timestamp: number;
+  file?: AttachedFilePayload;
 }

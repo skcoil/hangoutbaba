@@ -14,39 +14,71 @@ import { Spinner } from '@/components/ui/Spinner';
  */
 const compressImage = async (
   file: File,
-  maxDim = 1000,
-  quality = 0.75
+  maxDim = 800,
+  quality = 0.65
 ): Promise<{ data: string; size: number }> => {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
+    // If not an image, read directly as base64
+    if (!file.type.startsWith('image/')) {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const result = e.target?.result as string;
+        resolve({ data: result, size: file.size });
+      };
+      reader.onerror = () => {
+        resolve({ data: '', size: 0 });
+      };
+      reader.readAsDataURL(file);
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = (e) => {
+      const rawDataUrl = e.target?.result as string;
+      // Safety timer in case Image decoding hangs on mobile HEIC/corrupt photos
+      const timer = setTimeout(() => {
+        resolve({ data: rawDataUrl, size: file.size });
+      }, 3500);
+
       const img = new Image();
       img.onload = () => {
-        const canvas = document.createElement('canvas');
-        let { width, height } = img;
-        if (width > maxDim || height > maxDim) {
-          if (width > height) {
-            height = Math.round((height * maxDim) / width);
-            width = maxDim;
-          } else {
-            width = Math.round((width * maxDim) / height);
-            height = maxDim;
+        clearTimeout(timer);
+        try {
+          const canvas = document.createElement('canvas');
+          let { width, height } = img;
+          if (width > maxDim || height > maxDim) {
+            if (width > height) {
+              height = Math.round((height * maxDim) / width);
+              width = maxDim;
+            } else {
+              width = Math.round((width * maxDim) / height);
+              height = maxDim;
+            }
           }
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            return resolve({ data: rawDataUrl, size: file.size });
+          }
+          ctx.drawImage(img, 0, 0, width, height);
+          const dataUrl = canvas.toDataURL('image/jpeg', quality);
+          const base64Length = dataUrl.length - (dataUrl.indexOf(',') + 1);
+          const approxBytes = Math.round((base64Length * 3) / 4);
+          resolve({ data: dataUrl, size: approxBytes });
+        } catch {
+          resolve({ data: rawDataUrl, size: file.size });
         }
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return reject(new Error('Canvas context failed'));
-        ctx.drawImage(img, 0, 0, width, height);
-        const dataUrl = canvas.toDataURL('image/jpeg', quality);
-        const base64Length = dataUrl.length - (dataUrl.indexOf(',') + 1);
-        const approxBytes = Math.round((base64Length * 3) / 4);
-        resolve({ data: dataUrl, size: approxBytes });
       };
-      img.onerror = reject;
-      img.src = e.target?.result as string;
+      img.onerror = () => {
+        clearTimeout(timer);
+        resolve({ data: rawDataUrl, size: file.size });
+      };
+      img.src = rawDataUrl;
     };
-    reader.onerror = reject;
+    reader.onerror = () => {
+      resolve({ data: '', size: 0 });
+    };
     reader.readAsDataURL(file);
   });
 };
@@ -72,6 +104,7 @@ export default function VideoChatPage() {
     waitingCount,
     facingMode,
     isFlippingCamera,
+    autoSkippedNotice,
     flipCamera,
     initLocalMedia,
     startSearching,
@@ -87,9 +120,6 @@ export default function VideoChatPage() {
   const videoContainerRef = useRef<HTMLDivElement>(null);
   const desktopChatBottomRef = useRef<HTMLDivElement>(null);
   const mobileChatBottomRef = useRef<HTMLDivElement>(null);
-
-  const desktopFileInputRef = useRef<HTMLInputElement>(null);
-  const mobileFileInputRef = useRef<HTMLInputElement>(null);
 
   const [chatInput, setChatInput] = useState('');
   const [isChatOpen, setIsChatOpen] = useState(false);
@@ -120,6 +150,22 @@ export default function VideoChatPage() {
       });
     }
   }, [remoteStream]);
+
+  // Auto-resume video elements on mobile when returning from background
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        if (remoteVideoRef.current && remoteStream) {
+          remoteVideoRef.current.play().catch(() => {});
+        }
+        if (localVideoRef.current && localStream) {
+          localVideoRef.current.play().catch(() => {});
+        }
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    return () => document.removeEventListener('visibilitychange', handleVisibility);
+  }, [remoteStream, localStream]);
 
   // Auto-scroll in-call chat
   useEffect(() => {
@@ -176,43 +222,36 @@ export default function VideoChatPage() {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.size > 10 * 1024 * 1024) {
-      alert('File is too large. Please select a file under 10MB.');
+    if (file.size > 8 * 1024 * 1024) {
+      alert('File is too large. Please select a photo or file under 8MB.');
       e.target.value = '';
       return;
     }
 
     setIsProcessingFile(true);
     try {
-      if (file.type.startsWith('image/')) {
-        const { data, size } = await compressImage(file, 1000, 0.75);
-        setPendingFile({
-          name: file.name,
-          type: file.type || 'image/jpeg',
-          size,
-          data,
-        });
-      } else {
-        if (file.size > 600 * 1024) {
-          alert('Non-image files must be under 600KB for in-call sharing.');
-          e.target.value = '';
-          setIsProcessingFile(false);
-          return;
-        }
-        const reader = new FileReader();
-        reader.onload = (ev) => {
-          const data = ev.target?.result as string;
-          setPendingFile({
-            name: file.name,
-            type: file.type || 'application/octet-stream',
-            size: file.size,
-            data,
-          });
-          setIsProcessingFile(false);
-        };
-        reader.readAsDataURL(file);
+      const { data, size } = await compressImage(file, 800, 0.65);
+      if (!data) {
+        alert('Could not read this file. Please select another image.');
+        setIsProcessingFile(false);
+        e.target.value = '';
         return;
       }
+
+      // Safeguard against Firestore 1MB document limit
+      if (size > 800 * 1024) {
+        alert('File size after encoding is too large for in-call messaging. Please select a smaller photo or document.');
+        setIsProcessingFile(false);
+        e.target.value = '';
+        return;
+      }
+
+      setPendingFile({
+        name: file.name,
+        type: file.type || 'image/jpeg',
+        size,
+        data,
+      });
     } catch (err) {
       console.error('[Video] File processing failed:', err);
       alert('Could not process this file.');
@@ -288,6 +327,13 @@ export default function VideoChatPage() {
               ref={videoContainerRef}
               className="relative flex-1 min-h-0 w-full bg-slate-900 rounded-2xl sm:rounded-3xl overflow-hidden border border-slate-800 shadow-2xl flex items-center justify-center"
             >
+              {/* Partner Skipped / Auto Next Notice Toast */}
+              {autoSkippedNotice && (
+                <div className="absolute top-12 left-1/2 -translate-x-1/2 z-30 px-4 py-2 bg-accent-600/90 text-white text-xs font-semibold rounded-full shadow-2xl backdrop-blur-md animate-fade-in flex items-center gap-2 border border-accent-400/40 pointer-events-none">
+                  <span className="w-2 h-2 rounded-full bg-white animate-ping" />
+                  <span>{autoSkippedNotice}</span>
+                </div>
+              )}
               {/* REMOTE STRANGER VIDEO CONTAINER (Swaps between Main Stage and Mini PiP Box) */}
               <div
                 className={
@@ -609,26 +655,32 @@ export default function VideoChatPage() {
 
                   {/* Mobile Chat Input Form */}
                   <form onSubmit={handleSendChat} className="p-2 border-t border-slate-800 bg-slate-950/50 flex items-center gap-1.5 shrink-0">
-                    {/* Hidden File Input */}
-                    <input
-                      type="file"
-                      ref={mobileFileInputRef}
-                      onChange={handleFileSelect}
-                      accept="image/*,.pdf,.doc,.docx,.txt"
-                      className="hidden"
-                    />
-
-                    {/* Attach File Button */}
-                    <button
-                      type="button"
-                      disabled={status !== 'connected' || isProcessingFile}
-                      onClick={() => mobileFileInputRef.current?.click()}
-                      className="w-8 h-8 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-300 flex items-center justify-center text-sm transition-colors shrink-0"
-                      title="Attach Image or File"
-                      aria-label="Attach File"
+                    {/* Native Label Cross-Platform Mobile File Picker */}
+                    <label
+                      htmlFor="mobile-chat-file-input"
+                      className={`w-8 h-8 rounded-xl border flex items-center justify-center text-sm transition-colors shrink-0 cursor-pointer ${
+                        status !== 'connected'
+                          ? 'opacity-50 cursor-not-allowed bg-slate-800/50 border-slate-700/40 text-slate-500'
+                          : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-300 active:scale-95'
+                      }`}
+                      title={status === 'connected' ? 'Attach Image or File' : 'Connect with a stranger to attach files'}
+                      onClick={(e) => {
+                        if (status !== 'connected') {
+                          e.preventDefault();
+                          alert('Connect with a stranger first to send photos & files.');
+                        }
+                      }}
                     >
+                      <input
+                        id="mobile-chat-file-input"
+                        type="file"
+                        disabled={status !== 'connected' || isProcessingFile}
+                        onChange={handleFileSelect}
+                        accept="image/*,.pdf,.doc,.docx,.txt"
+                        className="sr-only"
+                      />
                       {isProcessingFile ? <Spinner size="sm" /> : '📎'}
-                    </button>
+                    </label>
 
                     <input
                       type="text"
@@ -871,26 +923,32 @@ export default function VideoChatPage() {
 
               {/* Desktop Chat Input Form */}
               <form onSubmit={handleSendChat} className="p-2.5 border-t border-slate-800 bg-slate-950/40 flex items-center gap-2 shrink-0">
-                {/* Hidden File Input */}
-                <input
-                  type="file"
-                  ref={desktopFileInputRef}
-                  onChange={handleFileSelect}
-                  accept="image/*,.pdf,.doc,.docx,.txt"
-                  className="hidden"
-                />
-
-                {/* Attach File Button */}
-                <button
-                  type="button"
-                  disabled={status !== 'connected' || isProcessingFile}
-                  onClick={() => desktopFileInputRef.current?.click()}
-                  className="w-9 h-9 rounded-xl bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-300 flex items-center justify-center text-sm transition-colors shrink-0"
-                  title="Attach Image or File"
-                  aria-label="Attach File"
+                {/* Native Label Cross-Platform Desktop File Picker */}
+                <label
+                  htmlFor="desktop-chat-file-input"
+                  className={`w-9 h-9 rounded-xl border flex items-center justify-center text-sm transition-colors shrink-0 cursor-pointer ${
+                    status !== 'connected'
+                      ? 'opacity-50 cursor-not-allowed bg-slate-800/50 border-slate-700/40 text-slate-500'
+                      : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-300 active:scale-95'
+                  }`}
+                  title={status === 'connected' ? 'Attach Image or File' : 'Connect with a stranger to attach files'}
+                  onClick={(e) => {
+                    if (status !== 'connected') {
+                      e.preventDefault();
+                      alert('Connect with a stranger first to send photos & files.');
+                    }
+                  }}
                 >
+                  <input
+                    id="desktop-chat-file-input"
+                    type="file"
+                    disabled={status !== 'connected' || isProcessingFile}
+                    onChange={handleFileSelect}
+                    accept="image/*,.pdf,.doc,.docx,.txt"
+                    className="sr-only"
+                  />
                   {isProcessingFile ? <Spinner size="sm" /> : '📎'}
-                </button>
+                </label>
 
                 <input
                   type="text"

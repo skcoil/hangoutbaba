@@ -37,6 +37,7 @@ export function useVideoChat(session: SessionData | null) {
   const [waitingCount, setWaitingCount] = useState<number>(0);
   const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
   const [isFlippingCamera, setIsFlippingCamera] = useState(false);
+  const [autoSkippedNotice, setAutoSkippedNotice] = useState<string | null>(null);
 
   // References to keep mutable state across async callbacks
   const localStreamRef = useRef<MediaStream | null>(null);
@@ -46,6 +47,9 @@ export function useVideoChat(session: SessionData | null) {
   const queuedCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
   const isRemoteDescSetRef = useRef(false);
   const rtcConfigRef = useRef<RTCConfiguration>(RTC_CONFIG);
+  const isManualStopRef = useRef(false);
+  const startSearchingRef = useRef<() => Promise<void>>(() => Promise.resolve());
+  const wakeLockRef = useRef<any>(null);
 
   // Fetch best available dynamic/custom RTC configuration (STUN + TURN)
   useEffect(() => {
@@ -370,13 +374,21 @@ export function useVideoChat(session: SessionData | null) {
       setMessages(loaded);
     });
 
-    // Listen to call doc status (e.g. if partner ended)
+    // Listen to call doc status (e.g. if partner ended or skipped)
     const callDocRef = doc(db, 'video_calls', callId);
     unsubCallRef.current = onSnapshot(callDocRef, (docSnap) => {
       if (!docSnap.exists()) return;
       const data = docSnap.data();
       if (data?.status === 'ended') {
-        setStatus('ended');
+        if (!isManualStopRef.current) {
+          console.log('[useVideoChat] Partner skipped or disconnected, auto-finding next stranger...');
+          setAutoSkippedNotice('Stranger disconnected. Finding next stranger...');
+          setTimeout(() => setAutoSkippedNotice(null), 3000);
+          cleanupCall(true);
+          startSearchingRef.current();
+        } else {
+          setStatus('ended');
+        }
       }
     });
 
@@ -737,10 +749,16 @@ export function useVideoChat(session: SessionData | null) {
     }
   }, [session, initLocalMedia, cleanupCall, cleanupQueue, startAsCaller, startAsCallee]);
 
+  // Keep startSearchingRef up-to-date for automatic partner-skip routing
+  useEffect(() => {
+    startSearchingRef.current = startSearching;
+  }, [startSearching]);
+
   /**
    * Skip to the next stranger
    */
   const nextStranger = useCallback(async () => {
+    isManualStopRef.current = false;
     await startSearching();
   }, [startSearching]);
 
@@ -748,6 +766,7 @@ export function useVideoChat(session: SessionData | null) {
    * Stop video chat completely
    */
   const stopChat = useCallback(() => {
+    isManualStopRef.current = true;
     cleanupCall(false);
     cleanupQueue();
     setStatus('idle');
@@ -807,17 +826,72 @@ export function useVideoChat(session: SessionData | null) {
     [session]
   );
 
+  // Screen Wake Lock API to prevent phone screen from sleeping during active calls
+  const requestWakeLock = useCallback(async () => {
+    if (typeof window !== 'undefined' && 'wakeLock' in navigator && !wakeLockRef.current) {
+      try {
+        wakeLockRef.current = await (navigator as any).wakeLock.request('screen');
+        wakeLockRef.current.addEventListener('release', () => {
+          wakeLockRef.current = null;
+        });
+      } catch (err) {
+        console.warn('[useVideoChat] Wake Lock request error:', err);
+      }
+    }
+  }, []);
+
+  const releaseWakeLock = useCallback(async () => {
+    if (wakeLockRef.current) {
+      try {
+        await wakeLockRef.current.release();
+      } catch {}
+      wakeLockRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (status === 'connected') {
+      requestWakeLock();
+    } else {
+      releaseWakeLock();
+    }
+    return () => {
+      releaseWakeLock();
+    };
+  }, [status, requestWakeLock, releaseWakeLock]);
+
+  // Handle mobile tab visibility changes (auto-resume camera and audio when returning from background)
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        console.log('[useVideoChat] Tab visible, ensuring media tracks are active...');
+        if (localStreamRef.current) {
+          localStreamRef.current.getVideoTracks().forEach((track) => {
+            if (!isVideoOff && !track.enabled) {
+              track.enabled = true;
+            }
+          });
+        }
+        if (status === 'connected') {
+          requestWakeLock();
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [status, isVideoOff, requestWakeLock]);
+
   // Clean up on component unmount or browser close
   useEffect(() => {
     const handleUnload = () => {
       if (session?.id && isFirebaseConfigured) {
-        // Remove from queue
+        // Remove self from matchmaking waiting queue
         const queueDocRef = doc(db, 'video_queue', session.id);
         deleteDoc(queueDocRef).catch(() => {});
-        if (currentCallIdRef.current) {
-          const callDocRef = doc(db, 'video_calls', currentCallIdRef.current);
-          updateDoc(callDocRef, { status: 'ended' }).catch(() => {});
-        }
+        // NOTE: We do NOT aggressively end active calls on mobile beforeunload,
+        // because mobile browsers fire beforeunload when simply switching apps or backgrounding.
+        // WebRTC peer connection naturally handles true disconnects via ICE/DTLS timeout.
       }
     };
 
@@ -842,6 +916,7 @@ export function useVideoChat(session: SessionData | null) {
     waitingCount,
     facingMode,
     isFlippingCamera,
+    autoSkippedNotice,
     flipCamera,
     initLocalMedia,
     startSearching,

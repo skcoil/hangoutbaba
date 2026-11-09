@@ -90,6 +90,39 @@ const formatFileSize = (bytes: number): string => {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 };
 
+/**
+ * Universal helper to categorize ANY file type (Images, PDF, Documents, Archives, Audio, Video, APK, Code)
+ */
+const getFileTypeInfo = (fileOrName: File | string, mimeType?: string) => {
+  const name = typeof fileOrName === 'string' ? fileOrName : fileOrName.name;
+  const ext = (name.split('.').pop() || '').toLowerCase();
+  const type = (typeof fileOrName !== 'string' ? fileOrName.type : mimeType) || '';
+
+  const isImage = type.startsWith('image/') || ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'ico', 'heic', 'heif'].includes(ext);
+  const isPdf = type === 'application/pdf' || ext === 'pdf';
+  const isAudio = type.startsWith('audio/') || ['mp3', 'wav', 'm4a', 'aac', 'ogg', 'flac'].includes(ext);
+  const isVideo = type.startsWith('video/') || ['mp4', 'mov', 'webm', 'mkv', 'avi'].includes(ext);
+  const isArchive = ['zip', 'rar', '7z', 'tar', 'gz', 'bz2', 'iso'].includes(ext);
+  const isDoc = ['doc', 'docx', 'rtf', 'odt', 'txt', 'md'].includes(ext);
+  const isSheet = ['xls', 'xlsx', 'csv'].includes(ext);
+  const isApk = ext === 'apk';
+  const isCode = ['js', 'ts', 'jsx', 'tsx', 'py', 'json', 'html', 'css', 'c', 'cpp', 'java', 'sql'].includes(ext);
+
+  let icon = '📄';
+  let label = 'File';
+  if (isImage) { icon = '🖼️'; label = 'Image'; }
+  else if (isPdf) { icon = '📕'; label = 'PDF'; }
+  else if (isAudio) { icon = '🎵'; label = 'Audio'; }
+  else if (isVideo) { icon = '🎬'; label = 'Video'; }
+  else if (isArchive) { icon = '📦'; label = 'Archive'; }
+  else if (isDoc) { icon = '📘'; label = 'Word Doc'; }
+  else if (isSheet) { icon = '📗'; label = 'Spreadsheet'; }
+  else if (isApk) { icon = '📱'; label = 'App Package'; }
+  else if (isCode) { icon = '💻'; label = 'Code File'; }
+
+  return { isImage, isPdf, isAudio, isVideo, isArchive, isDoc, isSheet, isApk, isCode, icon, label, ext };
+};
+
 export default function VideoChatPage() {
   const { session, loading: sessionLoading } = useSession();
   const {
@@ -117,6 +150,7 @@ export default function VideoChatPage() {
 
   const localVideoRef = useRef<HTMLVideoElement>(null);
   const remoteVideoRef = useRef<HTMLVideoElement>(null);
+  const remoteAudioRef = useRef<HTMLAudioElement>(null);
   const videoContainerRef = useRef<HTMLDivElement>(null);
   const desktopChatBottomRef = useRef<HTMLDivElement>(null);
   const mobileChatBottomRef = useRef<HTMLDivElement>(null);
@@ -149,14 +183,22 @@ export default function VideoChatPage() {
         console.warn('[Video] Remote stream play() failed, waiting for user gesture:', err);
       });
     }
+    // Also attach to dedicated background audio element so mobile OS never suspends audio session in background!
+    if (remoteAudioRef.current && remoteStream) {
+      remoteAudioRef.current.srcObject = remoteStream;
+      remoteAudioRef.current.play().catch(() => {});
+    }
   }, [remoteStream]);
 
-  // Auto-resume video elements on mobile when returning from background
+  // Auto-resume video & audio elements on mobile when returning from background
   useEffect(() => {
     const handleVisibility = () => {
       if (document.visibilityState === 'visible') {
         if (remoteVideoRef.current && remoteStream) {
           remoteVideoRef.current.play().catch(() => {});
+        }
+        if (remoteAudioRef.current && remoteStream) {
+          remoteAudioRef.current.play().catch(() => {});
         }
         if (localVideoRef.current && localStream) {
           localVideoRef.current.play().catch(() => {});
@@ -223,35 +265,55 @@ export default function VideoChatPage() {
     if (!file) return;
 
     if (file.size > 8 * 1024 * 1024) {
-      alert('File is too large. Please select a photo or file under 8MB.');
+      alert('File is too large. Please select a file under 8MB.');
       e.target.value = '';
       return;
     }
 
     setIsProcessingFile(true);
     try {
-      const { data, size } = await compressImage(file, 800, 0.65);
-      if (!data) {
-        alert('Could not read this file. Please select another image.');
-        setIsProcessingFile(false);
-        e.target.value = '';
+      const typeInfo = getFileTypeInfo(file);
+
+      if (typeInfo.isImage) {
+        // Automatically optimize images for quick transfer
+        const { data, size } = await compressImage(file, 800, 0.65);
+        if (!data) {
+          alert('Could not process this image.');
+          return;
+        }
+        setPendingFile({
+          name: file.name,
+          type: file.type || 'image/jpeg',
+          size,
+          data,
+        });
+      } else {
+        // ANY other file (PDF, DOC, ZIP, MP3, MP4, APK, TXT, etc.)
+        if (file.size > 720 * 1024) {
+          alert(`File "${file.name}" is ${formatFileSize(file.size)}. For in-call sharing, non-image files must be under 720 KB.`);
+          setIsProcessingFile(false);
+          e.target.value = '';
+          return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          const data = ev.target?.result as string;
+          setPendingFile({
+            name: file.name,
+            type: file.type || 'application/octet-stream',
+            size: file.size,
+            data,
+          });
+          setIsProcessingFile(false);
+        };
+        reader.onerror = () => {
+          alert('Could not read this file.');
+          setIsProcessingFile(false);
+        };
+        reader.readAsDataURL(file);
         return;
       }
-
-      // Safeguard against Firestore 1MB document limit
-      if (size > 800 * 1024) {
-        alert('File size after encoding is too large for in-call messaging. Please select a smaller photo or document.');
-        setIsProcessingFile(false);
-        e.target.value = '';
-        return;
-      }
-
-      setPendingFile({
-        name: file.name,
-        type: file.type || 'image/jpeg',
-        size,
-        data,
-      });
     } catch (err) {
       console.error('[Video] File processing failed:', err);
       alert('Could not process this file.');
@@ -334,6 +396,9 @@ export default function VideoChatPage() {
                   <span>{autoSkippedNotice}</span>
                 </div>
               )}
+
+              {/* Dedicated Background Audio element (Keeps mobile OS audio session and WebRTC alive in background!) */}
+              <audio ref={remoteAudioRef} autoPlay playsInline className="hidden" />
               {/* REMOTE STRANGER VIDEO CONTAINER (Swaps between Main Stage and Mini PiP Box) */}
               <div
                 className={
@@ -601,28 +666,37 @@ export default function VideoChatPage() {
                             {/* Attached File/Image */}
                             {msg.file && (
                               <div className="mt-1">
-                                {msg.file.type.startsWith('image/') ? (
+                                {getFileTypeInfo(msg.file.name, msg.file.type).isImage ? (
                                   <div className="relative group">
                                     <img
                                       src={msg.file.data}
                                       alt={msg.file.name}
                                       onClick={() => setLightboxImage({ src: msg.file!.data, name: msg.file!.name })}
-                                      className="max-w-[180px] max-h-[140px] rounded-lg object-cover cursor-pointer hover:opacity-90 shadow-sm border border-white/10"
+                                      className="max-w-[190px] max-h-[140px] rounded-lg object-cover cursor-pointer hover:opacity-90 shadow-sm border border-white/10"
                                     />
-                                    <span className="text-[8px] opacity-75 mt-0.5 block truncate max-w-[180px]">
-                                      {msg.file.name} ({formatFileSize(msg.file.size)})
-                                    </span>
+                                    <div className="flex items-center justify-between text-[8px] opacity-75 mt-0.5 max-w-[190px] truncate">
+                                      <span className="truncate">{msg.file.name}</span>
+                                      <span className="shrink-0 ml-1">{formatFileSize(msg.file.size)}</span>
+                                    </div>
                                   </div>
                                 ) : (
                                   <a
                                     href={msg.file.data}
                                     download={msg.file.name}
-                                    className="flex items-center gap-1.5 p-1.5 rounded-lg bg-black/40 hover:bg-black/60 text-[11px] underline truncate"
+                                    className="flex items-center gap-2 p-2 rounded-xl bg-black/40 hover:bg-black/60 border border-white/10 text-xs transition-colors group mt-0.5"
                                   >
-                                    <span>📄</span>
-                                    <span className="truncate">{msg.file.name}</span>
-                                    <span className="text-[9px] opacity-75">({formatFileSize(msg.file.size)})</span>
-                                    <span>⬇️</span>
+                                    <span className="text-xl shrink-0">
+                                      {getFileTypeInfo(msg.file.name, msg.file.type).icon}
+                                    </span>
+                                    <div className="flex-1 min-w-0">
+                                      <p className="font-medium text-slate-100 truncate">{msg.file.name}</p>
+                                      <p className="text-[10px] text-slate-400">
+                                        {formatFileSize(msg.file.size)} • {getFileTypeInfo(msg.file.name, msg.file.type).ext.toUpperCase() || 'FILE'}
+                                      </p>
+                                    </div>
+                                    <span className="p-1 rounded-lg bg-white/10 group-hover:bg-accent-600 text-white text-xs shrink-0 transition-colors">
+                                      ⬇️
+                                    </span>
                                   </a>
                                 )}
                               </div>
@@ -638,7 +712,7 @@ export default function VideoChatPage() {
                   {pendingFile && (
                     <div className="px-3 py-1.5 bg-slate-800 border-t border-slate-700 flex items-center justify-between gap-2 text-xs text-slate-200 shrink-0">
                       <div className="flex items-center gap-2 truncate">
-                        <span>{pendingFile.type.startsWith('image/') ? '🖼️' : '📄'}</span>
+                        <span className="text-base">{getFileTypeInfo(pendingFile.name, pendingFile.type).icon}</span>
                         <span className="truncate font-medium">{pendingFile.name}</span>
                         <span className="text-[10px] text-slate-400">({formatFileSize(pendingFile.size)})</span>
                       </div>
@@ -676,7 +750,7 @@ export default function VideoChatPage() {
                         type="file"
                         disabled={status !== 'connected' || isProcessingFile}
                         onChange={handleFileSelect}
-                        accept="image/*,.pdf,.doc,.docx,.txt"
+                        accept="*/*"
                         className="sr-only"
                       />
                       {isProcessingFile ? <Spinner size="sm" /> : '📎'}
@@ -869,7 +943,7 @@ export default function VideoChatPage() {
                         {/* Attached File/Image */}
                         {msg.file && (
                           <div className="mt-1">
-                            {msg.file.type.startsWith('image/') ? (
+                            {getFileTypeInfo(msg.file.name, msg.file.type).isImage ? (
                               <div className="relative group">
                                 <img
                                   src={msg.file.data}
@@ -877,20 +951,29 @@ export default function VideoChatPage() {
                                   onClick={() => setLightboxImage({ src: msg.file!.data, name: msg.file!.name })}
                                   className="max-w-[200px] max-h-[160px] rounded-lg object-cover cursor-pointer hover:opacity-90 shadow-sm border border-white/10"
                                 />
-                                <span className="text-[8px] opacity-75 mt-0.5 block truncate max-w-[200px]">
-                                  {msg.file.name} ({formatFileSize(msg.file.size)})
-                                </span>
+                                <div className="flex items-center justify-between text-[8px] opacity-75 mt-0.5 max-w-[200px] truncate">
+                                  <span className="truncate">{msg.file.name}</span>
+                                  <span className="shrink-0 ml-1">{formatFileSize(msg.file.size)}</span>
+                                </div>
                               </div>
                             ) : (
                               <a
                                 href={msg.file.data}
                                 download={msg.file.name}
-                                className="flex items-center gap-1.5 p-1.5 rounded-lg bg-black/40 hover:bg-black/60 text-[11px] underline truncate"
+                                className="flex items-center gap-2 p-2 rounded-xl bg-black/40 hover:bg-black/60 border border-white/10 text-xs transition-colors group mt-0.5"
                               >
-                                <span>📄</span>
-                                <span className="truncate">{msg.file.name}</span>
-                                <span className="text-[9px] opacity-75">({formatFileSize(msg.file.size)})</span>
-                                <span>⬇️</span>
+                                <span className="text-xl shrink-0">
+                                  {getFileTypeInfo(msg.file.name, msg.file.type).icon}
+                                </span>
+                                <div className="flex-1 min-w-0">
+                                  <p className="font-medium text-slate-100 truncate">{msg.file.name}</p>
+                                  <p className="text-[10px] text-slate-400">
+                                    {formatFileSize(msg.file.size)} • {getFileTypeInfo(msg.file.name, msg.file.type).ext.toUpperCase() || 'FILE'}
+                                  </p>
+                                </div>
+                                <span className="p-1 rounded-lg bg-white/10 group-hover:bg-accent-600 text-white text-xs shrink-0 transition-colors">
+                                  ⬇️
+                                </span>
                               </a>
                             )}
                           </div>
@@ -906,7 +989,7 @@ export default function VideoChatPage() {
               {pendingFile && (
                 <div className="px-3.5 py-1.5 bg-slate-800 border-t border-slate-700 flex items-center justify-between gap-2 text-xs text-slate-200 shrink-0">
                   <div className="flex items-center gap-2 truncate">
-                    <span>{pendingFile.type.startsWith('image/') ? '🖼️' : '📄'}</span>
+                    <span className="text-base">{getFileTypeInfo(pendingFile.name, pendingFile.type).icon}</span>
                     <span className="truncate font-medium">{pendingFile.name}</span>
                     <span className="text-[10px] text-slate-400">({formatFileSize(pendingFile.size)})</span>
                   </div>
@@ -944,7 +1027,7 @@ export default function VideoChatPage() {
                     type="file"
                     disabled={status !== 'connected' || isProcessingFile}
                     onChange={handleFileSelect}
-                    accept="image/*,.pdf,.doc,.docx,.txt"
+                    accept="*/*"
                     className="sr-only"
                   />
                   {isProcessingFile ? <Spinner size="sm" /> : '📎'}

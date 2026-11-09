@@ -327,26 +327,63 @@ export function useVideoChat(session: SessionData | null) {
       }
     };
 
+    // Disconnect grace timer to prevent dropping calls when mobile briefly switches apps / backgrounds
+    let disconnectGraceTimer: NodeJS.Timeout | null = null;
+
     // Connection state changes
     pc.onconnectionstatechange = () => {
       const state = pc.connectionState;
       console.log('[WebRTC] Peer Connection State:', state);
       if (state === 'connected') {
+        if (disconnectGraceTimer) {
+          clearTimeout(disconnectGraceTimer);
+          disconnectGraceTimer = null;
+        }
         setStatus('connected');
-      } else if (state === 'failed' || state === 'closed') {
+      } else if (state === 'disconnected') {
+        console.log('[WebRTC] Peer temporarily disconnected (backgrounding/packet jitter), waiting for recovery...');
+        // Do NOT end call immediately!
+      } else if (state === 'failed') {
+        console.warn('[WebRTC] Peer connection reported failed, attempting ICE restart and starting 25s grace period...');
+        try {
+          pc.restartIce();
+        } catch {}
+        if (!disconnectGraceTimer) {
+          disconnectGraceTimer = setTimeout(() => {
+            if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+              setStatus('ended');
+            }
+          }, 25000);
+        }
+      } else if (state === 'closed') {
         setStatus('ended');
       }
     };
 
-    // ICE Connection state changes (crucial for diagnosing NAT & cross-network traversal)
+    // ICE Connection state changes
     pc.oniceconnectionstatechange = () => {
       const iceState = pc.iceConnectionState;
       console.log('[WebRTC] ICE Connection State:', iceState);
       if (iceState === 'connected' || iceState === 'completed') {
+        if (disconnectGraceTimer) {
+          clearTimeout(disconnectGraceTimer);
+          disconnectGraceTimer = null;
+        }
         setStatus('connected');
+      } else if (iceState === 'disconnected') {
+        console.log('[WebRTC] ICE disconnected temporarily (mobile backgrounding), awaiting recovery...');
       } else if (iceState === 'failed') {
-        console.warn('[WebRTC] ICE Connection failed across network');
-        setStatus('ended');
+        console.warn('[WebRTC] ICE Connection failed, attempting ICE restart...');
+        try {
+          pc.restartIce();
+        } catch {}
+        if (!disconnectGraceTimer) {
+          disconnectGraceTimer = setTimeout(() => {
+            if (pc.iceConnectionState === 'failed') {
+              setStatus('ended');
+            }
+          }, 25000);
+        }
       }
     };
 
@@ -865,13 +902,42 @@ export function useVideoChat(session: SessionData | null) {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         console.log('[useVideoChat] Tab visible, ensuring media tracks are active...');
-        if (localStreamRef.current) {
-          localStreamRef.current.getVideoTracks().forEach((track) => {
-            if (!isVideoOff && !track.enabled) {
-              track.enabled = true;
-            }
-          });
+        
+        // 1. Check if camera track is ended or muted by mobile OS
+        if (localStreamRef.current && !isVideoOff) {
+          const videoTracks = localStreamRef.current.getVideoTracks();
+          const isTerminated = videoTracks.some((t) => t.readyState === 'ended' || t.muted);
+          if (isTerminated || videoTracks.length === 0) {
+            console.log('[useVideoChat] Camera was revoked by OS in background, re-acquiring...');
+            navigator.mediaDevices?.getUserMedia({
+              video: { facingMode: facingModeRef.current },
+              audio: false,
+            }).then((freshStream) => {
+              const freshTrack = freshStream.getVideoTracks()[0];
+              if (freshTrack && localStreamRef.current) {
+                if (pcRef.current) {
+                  const sender = pcRef.current.getSenders().find((s) => s.track?.kind === 'video');
+                  if (sender) {
+                    sender.replaceTrack(freshTrack).catch(() => {});
+                  }
+                }
+                videoTracks.forEach((t) => t.stop());
+                const audioTracks = localStreamRef.current.getAudioTracks();
+                const newCombined = new MediaStream([...audioTracks, freshTrack]);
+                setLocalStream(newCombined);
+                localStreamRef.current = newCombined;
+              }
+            }).catch((err) => {
+              console.warn('[useVideoChat] Re-acquire camera failed:', err);
+            });
+          } else {
+            videoTracks.forEach((track) => {
+              if (!track.enabled) track.enabled = true;
+            });
+          }
         }
+
+        // 2. Re-acquire screen wake lock
         if (status === 'connected') {
           requestWakeLock();
         }

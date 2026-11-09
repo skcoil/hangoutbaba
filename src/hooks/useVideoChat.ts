@@ -57,6 +57,7 @@ export function useVideoChat(session: SessionData | null) {
   const unsubCandidatesRef = useRef<(() => void) | null>(null);
   const unsubMessagesRef = useRef<(() => void) | null>(null);
   const heartbeatRef = useRef<NodeJS.Timeout | null>(null);
+  const matchmakingPollRef = useRef<NodeJS.Timeout | null>(null);
 
   // Keep localStreamRef updated
   useEffect(() => {
@@ -93,14 +94,30 @@ export function useVideoChat(session: SessionData | null) {
 
     try {
       setError(null);
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-          facingMode: 'user',
-        },
-        audio: true,
-      });
+      let stream: MediaStream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: {
+            width: { ideal: 1280, max: 1920 },
+            height: { ideal: 720, max: 1080 },
+            facingMode: 'user',
+          },
+          audio: true,
+        });
+      } catch (firstErr) {
+        console.warn('[useVideoChat] High-res getUserMedia failed, retrying with fallback constraints:', firstErr);
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: 'user' },
+            audio: true,
+          });
+        } catch (secondErr) {
+          stream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: true,
+          });
+        }
+      }
 
       setLocalStream(stream);
       localStreamRef.current = stream;
@@ -149,6 +166,8 @@ export function useVideoChat(session: SessionData | null) {
       pcRef.current.ontrack = null;
       pcRef.current.onicecandidate = null;
       pcRef.current.onconnectionstatechange = null;
+      pcRef.current.oniceconnectionstatechange = null;
+      pcRef.current.onicecandidateerror = null;
       pcRef.current.close();
       pcRef.current = null;
     }
@@ -178,6 +197,10 @@ export function useVideoChat(session: SessionData | null) {
       clearInterval(heartbeatRef.current);
       heartbeatRef.current = null;
     }
+    if (matchmakingPollRef.current) {
+      clearInterval(matchmakingPollRef.current);
+      matchmakingPollRef.current = null;
+    }
     if (session?.id && isFirebaseConfigured) {
       const queueDocRef = doc(db, 'video_queue', session.id);
       deleteDoc(queueDocRef).catch(() => {});
@@ -200,10 +223,18 @@ export function useVideoChat(session: SessionData | null) {
       });
     }
 
-    // Handle remote track arrival
+    // Handle remote track arrival (supporting both event.streams and event.track for mobile Safari/Chrome)
     pc.ontrack = (event) => {
+      console.log('[WebRTC] ontrack received:', event.track?.kind);
       if (event.streams && event.streams[0]) {
         setRemoteStream(event.streams[0]);
+        setStatus('connected');
+      } else if (event.track) {
+        setRemoteStream((prev) => {
+          const s = prev || new MediaStream();
+          s.addTrack(event.track);
+          return s;
+        });
         setStatus('connected');
       }
     };
@@ -446,7 +477,7 @@ export function useVideoChat(session: SessionData | null) {
   );
 
   /**
-   * Main Matchmaking: Find random stranger or wait in queue
+   * Main Matchmaking: Find random stranger or wait in queue with cross-device clock skew tolerance
    */
   const startSearching = useCallback(async () => {
     if (!session) return;
@@ -468,25 +499,30 @@ export function useVideoChat(session: SessionData | null) {
     }
 
     try {
-      // 3. Look for an existing waiting stranger in video_queue
-      const queueCol = collection(db, 'video_queue');
-      const q = query(queueCol, where('status', '==', 'waiting'));
-      const snapshot = await getDocs(q);
+      // Helper function to scan queue and attempt atomic transaction
+      const attemptMatch = async (): Promise<boolean> => {
+        if (currentCallIdRef.current || pcRef.current) return true;
 
-      const now = Date.now();
-      let matchedCandidate: { id: string; data: any } | null = null;
+        const queueCol = collection(db, 'video_queue');
+        const q = query(queueCol, where('status', '==', 'waiting'));
+        const snapshot = await getDocs(q);
 
-      snapshot.forEach((docSnap) => {
-        if (matchedCandidate) return;
-        const d = docSnap.data();
-        // Candidate must not be self, must have valid recent heartbeat (< 25s)
-        if (docSnap.id !== session.id && d.updatedAt && now - d.updatedAt < 25000) {
-          matchedCandidate = { id: docSnap.id, data: d };
-        }
-      });
+        const now = Date.now();
+        let matchedCandidate: { id: string; data: any } | null = null;
 
-      // If a candidate was found, attempt an atomic transaction to claim
-      if (matchedCandidate) {
+        snapshot.forEach((docSnap) => {
+          if (matchedCandidate) return;
+          const d = docSnap.data();
+          // Skip self
+          if (docSnap.id === session.id) return;
+          // Generous 120s tolerance to handle cross-device clock skew (Mobile vs PC time offsets)
+          if (!d.updatedAt || Math.abs(now - d.updatedAt) < 120000) {
+            matchedCandidate = { id: docSnap.id, data: d };
+          }
+        });
+
+        if (!matchedCandidate) return false;
+
         const candidate = matchedCandidate as { id: string; data: any };
         const newCallId = `call_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
@@ -537,16 +573,35 @@ export function useVideoChat(session: SessionData | null) {
           });
 
           if (success) {
+            // Stop polling & heartbeat
+            if (matchmakingPollRef.current) {
+              clearInterval(matchmakingPollRef.current);
+              matchmakingPollRef.current = null;
+            }
+            if (heartbeatRef.current) {
+              clearInterval(heartbeatRef.current);
+              heartbeatRef.current = null;
+            }
+            if (unsubQueueRef.current) {
+              unsubQueueRef.current();
+              unsubQueueRef.current = null;
+            }
+
             // We are the caller!
             await startAsCaller(newCallId, candidate.data?.username || 'Stranger');
-            return;
+            return true;
           }
         } catch (txErr) {
           console.warn('[useVideoChat] Transaction race, falling back to queue:', txErr);
         }
-      }
+        return false;
+      };
 
-      // 4. No candidate found (or someone else claimed them) -> Register self as waiting
+      // 3. First immediate attempt to match with an existing waiting stranger
+      const matchedImmediately = await attemptMatch();
+      if (matchedImmediately) return;
+
+      // 4. No candidate found immediately -> Register self as waiting
       const myQueueRef = doc(db, 'video_queue', session.id);
       await setDoc(myQueueRef, {
         sessionId: session.id,
@@ -555,18 +610,28 @@ export function useVideoChat(session: SessionData | null) {
         updatedAt: Date.now(),
       });
 
-      // Send periodic heartbeat every 5 seconds
+      // Send periodic heartbeat every 4 seconds
       heartbeatRef.current = setInterval(() => {
         updateDoc(myQueueRef, { updatedAt: Date.now() }).catch(() => {});
-      }, 5000);
+      }, 4000);
 
-      // Listen for someone to match us
+      // Periodically scan for waiting candidates every 2.5 seconds while searching
+      matchmakingPollRef.current = setInterval(async () => {
+        if (currentCallIdRef.current || pcRef.current) return;
+        await attemptMatch();
+      }, 2500);
+
+      // Also listen to my own queue doc in case another peer claims us as callee
       unsubQueueRef.current = onSnapshot(myQueueRef, (docSnap) => {
         if (!docSnap.exists()) return;
         const data = docSnap.data();
 
         if (data?.status === 'matched' && data?.callId && data?.role === 'callee') {
-          // Stop queue heartbeat and listener
+          // Stop queue heartbeat, poll, and listener
+          if (matchmakingPollRef.current) {
+            clearInterval(matchmakingPollRef.current);
+            matchmakingPollRef.current = null;
+          }
           if (heartbeatRef.current) {
             clearInterval(heartbeatRef.current);
             heartbeatRef.current = null;

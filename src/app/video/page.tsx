@@ -46,10 +46,13 @@ export default function VideoChatPage() {
     }
   }, [localStream]);
 
-  // Attach remote media stream to remote video element
+  // Attach remote media stream to remote video element with play() trigger
   useEffect(() => {
     if (remoteVideoRef.current && remoteStream) {
       remoteVideoRef.current.srcObject = remoteStream;
+      remoteVideoRef.current.play().catch((err) => {
+        console.warn('[Video] Remote stream play() failed, waiting for user gesture:', err);
+      });
     }
   }, [remoteStream]);
 
